@@ -1,10 +1,13 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import DashboardHeader from "./dashboard-header";
-import { UserCheck, UserX, CalendarMinus, Clock } from "lucide-react";
+import { UserCheck, UserX, CalendarMinus, Clock, Building2, Filter } from "lucide-react";
+import { useState } from "react";
 import type { User, Stats, Attendance, LeaveRequest } from "@/types";
 
 interface HeadDashboardProps {
@@ -13,17 +16,32 @@ interface HeadDashboardProps {
 
 export default function HeadDashboard({ user }: HeadDashboardProps) {
   const { toast } = useToast();
+  const [selectedDepartment, setSelectedDepartment] = useState<string>("all");
 
   const { data: stats } = useQuery<Stats>({
     queryKey: ["/api/stats"],
   });
 
+  const { data: departmentSummary } = useQuery({
+    queryKey: ["/api/department-summary"],
+  });
+
   const { data: attendanceData } = useQuery<Attendance[]>({
-    queryKey: ["/api/attendance-all"],
+    queryKey: ["/api/attendance-by-department", selectedDepartment],
+    queryFn: () => {
+      if (selectedDepartment === "all") {
+        return apiRequest("GET", "/api/attendance-all").then(res => res.json());
+      }
+      return apiRequest("GET", `/api/attendance-by-department?department=${selectedDepartment}`).then(res => res.json());
+    }
   });
 
   const { data: leaveRequests } = useQuery<LeaveRequest[]>({
     queryKey: ["/api/leave-requests"],
+  });
+
+  const { data: allUsers } = useQuery<User[]>({
+    queryKey: ["/api/users"],
   });
 
   const respondToLeaveMutation = useMutation({
@@ -50,12 +68,14 @@ export default function HeadDashboard({ user }: HeadDashboardProps) {
     respondToLeaveMutation.mutate({ requestId, status });
   };
 
+  const departments = allUsers ? Array.from(new Set(allUsers.map(user => user.department).filter(Boolean))) : [];
+
   return (
     <div className="min-h-screen bg-gray-50">
       <DashboardHeader
         user={user}
         title="Head Dashboard"
-        subtitle={user.name}
+        subtitle="Approve leave requests and monitor all staff attendance"
         borderColor="border-university-head"
         bgColor="bg-university-head"
       />
@@ -119,6 +139,70 @@ export default function HeadDashboard({ user }: HeadDashboardProps) {
             </CardContent>
           </Card>
         </div>
+
+        {/* Department Summary */}
+        {departmentSummary && (
+          <Card className="mb-8">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Building2 className="h-5 w-5" />
+                Department Summary
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {departmentSummary.map((dept: any) => (
+                  <Card key={dept.department} className="p-4">
+                    <div className="space-y-2">
+                      <h4 className="font-semibold text-lg">{dept.department}</h4>
+                      <div className="grid grid-cols-2 gap-2 text-sm">
+                        <div>Total Staff: <span className="font-medium">{dept.totalStaff}</span></div>
+                        <div>Present: <span className="font-medium text-green-600">{dept.present}</span></div>
+                        <div>Absent: <span className="font-medium text-red-600">{dept.absent}</span></div>
+                        <div>On Leave: <span className="font-medium text-yellow-600">{dept.onLeave}</span></div>
+                      </div>
+                      <div className="pt-2">
+                        <div className="flex justify-between text-sm">
+                          <span>Attendance Rate</span>
+                          <span className="font-medium">{dept.attendanceRate}%</span>
+                        </div>
+                        <div className="w-full bg-gray-200 rounded-full h-2 mt-1">
+                          <div 
+                            className="bg-green-600 h-2 rounded-full" 
+                            style={{ width: `${dept.attendanceRate}%` }}
+                          ></div>
+                        </div>
+                      </div>
+                    </div>
+                  </Card>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Department Filter */}
+        <Card className="mb-8">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Filter className="h-5 w-5" />
+              Filter Staff Attendance
+            </CardTitle>
+            <div className="flex gap-4 mt-4">
+              <Select value={selectedDepartment} onValueChange={setSelectedDepartment}>
+                <SelectTrigger className="w-64">
+                  <SelectValue placeholder="Select department" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Departments</SelectItem>
+                  {departments.map(dept => (
+                    <SelectItem key={dept} value={dept}>{dept}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </CardHeader>
+        </Card>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           {/* Attendance Overview */}

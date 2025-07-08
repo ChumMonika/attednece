@@ -14,8 +14,10 @@ interface MazerDashboardProps {
 export default function MazerDashboard({ user }: MazerDashboardProps) {
   const { toast } = useToast();
 
+  // Filter to only show teachers
   const { data: todaySchedule } = useQuery<TodaySchedule[]>({
     queryKey: ["/api/attendance-today"],
+    select: (data) => data?.filter(person => person.role === 'teacher') || []
   });
 
   const markAttendanceMutation = useMutation({

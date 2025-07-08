@@ -23,6 +23,8 @@ export interface IStorage {
   getAttendance(userId: number): Promise<Attendance[]>;
   getAllAttendance(): Promise<Attendance[]>;
   getAttendanceByDate(date: string): Promise<Attendance[]>;
+  getAttendanceByDepartment(department: string): Promise<Attendance[]>;
+  getDepartmentSummary(): Promise<any>;
   markAttendance(attendance: InsertAttendance): Promise<Attendance>;
   
   // Leave request management
@@ -293,6 +295,47 @@ export class MemStorage implements IStorage {
 
   async getAttendanceByDate(date: string): Promise<Attendance[]> {
     return Array.from(this.attendance.values()).filter(att => att.date === date);
+  }
+
+  async getAttendanceByDepartment(department: string): Promise<Attendance[]> {
+    if (!department) return this.getAllAttendance();
+    
+    const departmentUsers = Array.from(this.users.values()).filter(user => user.department === department);
+    const userIds = departmentUsers.map(user => user.id);
+    
+    return Array.from(this.attendance.values()).filter(att => userIds.includes(att.userId));
+  }
+
+  async getDepartmentSummary(): Promise<any> {
+    const today = new Date().toISOString().split('T')[0];
+    const todayAttendance = await this.getAttendanceByDate(today);
+    const allUsers = Array.from(this.users.values());
+    
+    const departments = Array.from(new Set(allUsers.map(user => user.department).filter(Boolean)));
+    
+    const summary = departments.map(department => {
+      const deptUsers = allUsers.filter(user => user.department === department);
+      const deptAttendance = todayAttendance.filter(att => 
+        deptUsers.some(user => user.id === att.userId)
+      );
+      
+      const present = deptAttendance.filter(att => att.status === "present").length;
+      const absent = deptAttendance.filter(att => att.status === "absent").length;
+      const onLeave = deptAttendance.filter(att => att.status === "leave").length;
+      const notMarked = deptUsers.length - deptAttendance.length;
+      
+      return {
+        department,
+        totalStaff: deptUsers.length,
+        present,
+        absent,
+        onLeave,
+        notMarked,
+        attendanceRate: deptUsers.length > 0 ? Math.round((present / deptUsers.length) * 100) : 0
+      };
+    });
+    
+    return summary;
   }
 
   async markAttendance(insertAttendance: InsertAttendance): Promise<Attendance> {

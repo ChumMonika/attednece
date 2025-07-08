@@ -192,6 +192,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Department-specific routes for Head dashboard
+  app.get("/api/attendance-by-department", requireAuth, async (req, res) => {
+    try {
+      if ((req.session as any).userRole !== 'head') {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+      
+      const { department } = req.query;
+      const attendanceData = await storage.getAttendanceByDepartment(department as string);
+      res.json(attendanceData);
+    } catch (error) {
+      res.status(500).json({ message: "Server error" });
+    }
+  });
+
+  app.get("/api/department-summary", requireAuth, async (req, res) => {
+    try {
+      if ((req.session as any).userRole !== 'head') {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+      
+      const summary = await storage.getDepartmentSummary();
+      res.json(summary);
+    } catch (error) {
+      res.status(500).json({ message: "Server error" });
+    }
+  });
+
   // Leave request routes
   app.post("/api/leave-request", requireAuth, async (req, res) => {
     try {

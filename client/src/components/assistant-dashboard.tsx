@@ -14,8 +14,10 @@ interface AssistantDashboardProps {
 export default function AssistantDashboard({ user }: AssistantDashboardProps) {
   const { toast } = useToast();
 
+  // Filter to only show office staff (excluding teachers)
   const { data: todaySchedule } = useQuery<TodaySchedule[]>({
     queryKey: ["/api/attendance-today"],
+    select: (data) => data?.filter(person => person.role === 'staff') || []
   });
 
   const markAttendanceMutation = useMutation({
