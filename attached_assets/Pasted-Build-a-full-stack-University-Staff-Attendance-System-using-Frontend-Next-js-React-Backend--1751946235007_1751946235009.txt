@@ -1,0 +1,82 @@
+Build a full-stack University Staff Attendance System using:
+
+Frontend: Next.js (React)
+Backend: Flask (Python)
+
+Features:
+Login & Access:
+
+Users log in using unique ID and password.
+
+Redirect to role-specific dashboard after login (/dashboard/<role>).
+
+Session holds the user's ID and role.
+
+Roles & Dashboards:
+
+Head: View all attendance and leave requests. Approve/reject leave.
+
+Admin: Manage user accounts (add/edit/delete/view).
+
+Mazer: View & mark teacher attendance. Show today's teachers with subject and time like:
+
+less
+Copy
+Edit
+📅 Monday - Teacher Schedule & Attendance
+Mr. Chan (T001) – Math – 08:00-10:00 [✔ Present]
+Ms. Lina (T002) – English – 10:00-12:00 [Mark Present]
+Assistant: View & mark staff attendance. Show today's staff with type and schedule like:
+
+pgsql
+Copy
+Edit
+🧑‍💼 Staff on Monday - Schedule & Attendance
+Ms. Vanna (S001) – IT_Full-Time – 08:00–17:00 [✔ Present]
+Mr. Dara (S002) – IT-Part-Time – 08:00–12:00 [Mark Present]
+Teacher/Staff: View own attendance and submit leave requests.
+
+Backend API (Flask):
+Authentication
+
+POST /login – Input: {id, password} → Output: {role, name}
+
+Attendance
+
+GET /attendance/<id> – Get personal records
+
+GET /attendance-all – Head/Admin sees all
+
+POST /mark-attendance – Mark attendance with {id, date, status}
+
+Leave
+
+POST /leave-request – Submit leave
+
+GET /leave-requests – Head views pending
+
+POST /leave-requests/respond – Head approves/rejects
+
+Users
+
+GET /users – View all
+
+POST /user – Add
+
+PUT /user/<id> – Edit
+
+DELETE /user/<id> – Delete
+
+Additional Requirements:
+Use in-memory dictionaries to simulate a database (no DB needed).
+
+No demo credentials on login page.
+
+Dashboards should be full-screen with no sidebar/navigation.
+
+Attendance marking must be integrated directly into the daily schedule display.
+
+Use Tailwind or basic CSS for styling.
+
+Goal:
+A simple, clean role-based system where each user has access to their tools on one page. Mazer and Assistant can mark attendance easily with one click.
