@@ -6,6 +6,11 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import Login from "@/pages/login";
 import Dashboard from "@/pages/dashboard";
 import NotFound from "@/pages/not-found";
+import LeaveRequestsPage from "@/pages/leave-requests";
+import AttendancePage from "@/pages/attendance";
+import HeadDashboardPage from "@/pages/head-dashboard";
+import UserManagementPage from "@/pages/user-management";
+import AnalyticsPage from "@/pages/analytics";
 
 function Router() {
   return (
@@ -13,6 +18,11 @@ function Router() {
       <Route path="/" component={Login} />
       <Route path="/login" component={Login} />
       <Route path="/dashboard/:role" component={Dashboard} />
+      <Route path="/head-dashboard" component={HeadDashboardPage} />
+      <Route path="/attendance" component={AttendancePage} />
+      <Route path="/leave-requests" component={LeaveRequestsPage} />
+      <Route path="/user-management" component={UserManagementPage} />
+      <Route path="/analytics" component={AnalyticsPage} />
       <Route component={NotFound} />
     </Switch>
   );

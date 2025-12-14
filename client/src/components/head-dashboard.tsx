@@ -1,14 +1,18 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
+import { Link } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import DashboardHeader from "./dashboard-header";
+import DashboardHeader from "./admin-header";
 import { UserCheck, UserX, CalendarMinus, Clock, Building2, Filter } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import type { User, Stats, Attendance, LeaveRequest } from "@/types";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
 
 interface HeadDashboardProps {
   user: User;
@@ -17,12 +21,18 @@ interface HeadDashboardProps {
 export default function HeadDashboard({ user }: HeadDashboardProps) {
   const { toast } = useToast();
   const [selectedDepartment, setSelectedDepartment] = useState<string>("all");
+  const [isRejectDialogOpen, setIsRejectDialogOpen] = useState(false);
+  const [selectedRequest, setSelectedRequest] = useState<LeaveRequest | null>(null);
+  const [rejectionReason, setRejectionReason] = useState("");
+  const [refreshKey, setRefreshKey] = useState(0);
 
-  const { data: stats } = useQuery<Stats>({
-    queryKey: ["/api/stats"],
+  // Queries
+  const { data: dashboardMetrics } = useQuery({
+    queryKey: ["/api/dashboard/metrics"],
+    queryFn: () => apiRequest("GET", "/api/dashboard/metrics").then(res => res.json()),
   });
 
-  const { data: departmentSummary } = useQuery({
+  const { data: departmentSummary } = useQuery<any[]>({
     queryKey: ["/api/department-summary"],
   });
 
@@ -40,13 +50,10 @@ export default function HeadDashboard({ user }: HeadDashboardProps) {
     queryKey: ["/api/leave-requests"],
   });
 
-  const { data: allUsers } = useQuery<User[]>({
-    queryKey: ["/api/users"],
-  });
-
+  // Mutations
   const respondToLeaveMutation = useMutation({
-    mutationFn: ({ requestId, status }: { requestId: number; status: string }) =>
-      apiRequest("POST", "/api/leave-requests/respond", { requestId, status }),
+    mutationFn: ({ requestId, status, rejectionReason }: { requestId: number; status: "approved" | "rejected"; rejectionReason?: string }) =>
+      apiRequest("POST", "/api/leave-requests/respond", { requestId, status, rejectionReason }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/leave-requests"] });
       queryClient.invalidateQueries({ queryKey: ["/api/stats"] });
@@ -64,149 +71,159 @@ export default function HeadDashboard({ user }: HeadDashboardProps) {
     },
   });
 
-  const handleLeaveResponse = (requestId: number, status: "approved" | "rejected") => {
-    respondToLeaveMutation.mutate({ requestId, status });
+  // Event handlers
+  const handleApprove = (requestId: number) => {
+    respondToLeaveMutation.mutate({ requestId, status: "approved" });
   };
 
-  const departments = allUsers ? Array.from(new Set(allUsers.map(user => user.department).filter(Boolean))) : [];
+  const openRejectDialog = (request: LeaveRequest) => {
+    setSelectedRequest(request);
+    setRejectionReason("");
+    setIsRejectDialogOpen(true);
+  };
+
+  const handleRejectSubmit = () => {
+    if (!selectedRequest) return;
+    respondToLeaveMutation.mutate(
+      { requestId: selectedRequest.id, status: "rejected", rejectionReason },
+      {
+        onSuccess: () => {
+          setIsRejectDialogOpen(false);
+          setSelectedRequest(null);
+          setRejectionReason("");
+        }
+      }
+    );
+  };
+
+  // Computed values
+  const departments = attendanceData ? 
+    Array.from(new Set(attendanceData.map(record => record.user?.department).filter(Boolean))) as string[] : 
+    [];
+
+  const currentRoute = typeof window !== 'undefined' ? window.location.pathname : '';
+
+  // Effects
+  useEffect(() => {
+    const fetchPendingLeaveRequests = async () => {
+      try {
+        const response = await apiRequest("GET", "/api/leave-requests");
+        const data = await response.json();
+        queryClient.setQueryData(["/api/leave-requests"], data);
+      } catch (error) {
+        console.error("Failed to fetch leave requests:", error);
+      }
+    };
+
+    fetchPendingLeaveRequests();
+    
+    const interval = setInterval(() => {
+      setRefreshKey(prev => prev + 1);
+      fetchPendingLeaveRequests();
+    }, 30000);
+    
+    return () => clearInterval(interval);
+  }, [user, refreshKey]);
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <DashboardHeader
-        user={user}
-        title="Head Dashboard"
-        subtitle="Approve leave requests and monitor all staff attendance"
-        borderColor="border-university-head"
-        bgColor="bg-university-head"
-      />
-
-      <div className="max-w-7xl mx-auto px-6 py-8">
-        {/* Stats Overview */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-          <Card>
-            <CardContent className="p-6">
-              <div className="flex items-center">
-                <div className="w-12 h-12 bg-university-success bg-opacity-10 rounded-lg flex items-center justify-center">
-                  <UserCheck className="text-university-success h-6 w-6" />
-                </div>
-                <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600">Present Today</p>
-                  <p className="text-2xl font-bold text-gray-900">{stats?.present || 0}</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="p-6">
-              <div className="flex items-center">
-                <div className="w-12 h-12 bg-university-error bg-opacity-10 rounded-lg flex items-center justify-center">
-                  <UserX className="text-university-error h-6 w-6" />
-                </div>
-                <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600">Absent Today</p>
-                  <p className="text-2xl font-bold text-gray-900">{stats?.absent || 0}</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="p-6">
-              <div className="flex items-center">
-                <div className="w-12 h-12 bg-university-warning bg-opacity-10 rounded-lg flex items-center justify-center">
-                  <CalendarMinus className="text-university-warning h-6 w-6" />
-                </div>
-                <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600">On Leave</p>
-                  <p className="text-2xl font-bold text-gray-900">{stats?.onLeave || 0}</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="p-6">
-              <div className="flex items-center">
-                <div className="w-12 h-12 bg-university-blue bg-opacity-10 rounded-lg flex items-center justify-center">
-                  <Clock className="text-university-blue h-6 w-6" />
-                </div>
-                <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600">Pending Requests</p>
-                  <p className="text-2xl font-bold text-gray-900">{stats?.pendingRequests || 0}</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+    <div className="min-h-screen bg-gradient-to-tr from-indigo-100 via-pink-100 to-orange-100">
+      {/* Sidebar Navigation */}
+      <aside className="w-64 bg-white border-r border-gray-200 flex flex-col py-8 px-4 h-screen fixed top-0 left-0 z-20 overflow-y-auto">
+        <div className="flex items-center mb-10">
+          <Building2 className="h-8 w-8 text-university-head mr-2" />
+          <span className="text-2xl font-bold text-university-head">Head Panel</span>
         </div>
+        <nav className="flex flex-col gap-2">
+          <Link to="/head-dashboard" className={`flex items-center px-3 py-2 rounded-lg text-gray-700 font-medium hover:bg-university-head hover:text-white transition ${currentRoute === '/head-dashboard' ? 'bg-university-head text-white' : ''}`}> 
+            <UserCheck className="h-5 w-5 mr-3" /> Dashboard
+          </Link>
+          <Link to="/attendance" className={`flex items-center px-3 py-2 rounded-lg text-gray-700 font-medium hover:bg-university-head hover:text-white transition ${currentRoute === '/attendance' ? 'bg-university-head text-white' : ''}`}> 
+            <Clock className="h-5 w-5 mr-3" /> Attendance
+          </Link>
+          <Link to="/leave-requests" className={`flex items-center px-3 py-2 rounded-lg text-gray-700 font-medium hover:bg-university-head hover:text-white transition ${currentRoute === '/leave-requests' ? 'bg-university-head text-white' : ''}`}> 
+            <CalendarMinus className="h-5 w-5 mr-3" /> Leave Requests
+            {leaveRequests && leaveRequests.filter(req => req.status === 'pending').length > 0 && (
+              <span className="ml-2 px-2 py-0.5 text-xs rounded-full bg-university-warning text-white">
+                {leaveRequests.filter(req => req.status === 'pending').length}
+              </span>
+            )}
+          </Link>
+        </nav>
+      </aside>
 
-        {/* Department Summary */}
-        {departmentSummary && (
-          <Card className="mb-8">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Building2 className="h-5 w-5" />
-                Department Summary
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {departmentSummary.map((dept: any) => (
-                  <Card key={dept.department} className="p-4">
-                    <div className="space-y-2">
-                      <h4 className="font-semibold text-lg">{dept.department}</h4>
-                      <div className="grid grid-cols-2 gap-2 text-sm">
-                        <div>Total Staff: <span className="font-medium">{dept.totalStaff}</span></div>
-                        <div>Present: <span className="font-medium text-green-600">{dept.present}</span></div>
-                        <div>Absent: <span className="font-medium text-red-600">{dept.absent}</span></div>
-                        <div>On Leave: <span className="font-medium text-yellow-600">{dept.onLeave}</span></div>
-                      </div>
-                      <div className="pt-2">
-                        <div className="flex justify-between text-sm">
-                          <span>Attendance Rate</span>
-                          <span className="font-medium">{dept.attendanceRate}%</span>
-                        </div>
-                        <div className="w-full bg-gray-200 rounded-full h-2 mt-1">
-                          <div 
-                            className="bg-green-600 h-2 rounded-full" 
-                            style={{ width: `${dept.attendanceRate}%` }}
-                          ></div>
-                        </div>
-                      </div>
-                    </div>
-                  </Card>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        )}
+      {/* Main Content */}
+      <div className="ml-64 flex flex-col">
+        <DashboardHeader
+          user={user}
+          title="Head Dashboard"
+          subtitle="Manage leave requests and monitor attendance"
+          borderColor="border-university-head"
+          bgColor="bg-university-head"
+        />
+        
+        <div className="max-w-7xl mx-auto px-4 py-8">
+          {/* Stats Overview */}
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+            <Card>
+              <CardContent className="p-6">
+                <div className="flex items-center">
+                  <div className="w-12 h-12 bg-university-success bg-opacity-10 rounded-lg flex items-center justify-center">
+                    <UserCheck className="text-university-success h-6 w-6" />
+                  </div>
+                  <div className="ml-4">
+                    <p className="text-sm font-medium text-gray-600">Present Today</p>
+                    <p className="text-2xl font-bold text-gray-900">{dashboardMetrics?.today?.present || 0}</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
 
-        {/* Department Filter */}
-        <Card className="mb-8">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Filter className="h-5 w-5" />
-              Filter Staff Attendance
-            </CardTitle>
-            <div className="flex gap-4 mt-4">
-              <Select value={selectedDepartment} onValueChange={setSelectedDepartment}>
-                <SelectTrigger className="w-64">
-                  <SelectValue placeholder="Select department" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Departments</SelectItem>
-                  {departments.map(dept => (
-                    <SelectItem key={dept} value={dept}>{dept}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </CardHeader>
-        </Card>
+            <Card>
+              <CardContent className="p-6">
+                <div className="flex items-center">
+                  <div className="w-12 h-12 bg-university-error bg-opacity-10 rounded-lg flex items-center justify-center">
+                    <UserX className="text-university-error h-6 w-6" />
+                  </div>
+                  <div className="ml-4">
+                    <p className="text-sm font-medium text-gray-600">Absent Today</p>
+                    <p className="text-2xl font-bold text-gray-900">{dashboardMetrics?.today?.absent || 0}</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Attendance Overview */}
-          <div className="lg:col-span-2">
+            <Card>
+              <CardContent className="p-6">
+                <div className="flex items-center">
+                  <div className="w-12 h-12 bg-university-warning bg-opacity-10 rounded-lg flex items-center justify-center">
+                    <CalendarMinus className="text-university-warning h-6 w-6" />
+                  </div>
+                  <div className="ml-4">
+                    <p className="text-sm font-medium text-gray-600">On Leave</p>
+                    <p className="text-2xl font-bold text-gray-900">{dashboardMetrics?.today?.leave || 0}</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardContent className="p-6">
+                <div className="flex items-center">
+                  <div className="w-12 h-12 bg-university-blue bg-opacity-10 rounded-lg flex items-center justify-center">
+                    <Clock className="text-university-blue h-6 w-6" />
+                  </div>
+                  <div className="ml-4">
+                    <p className="text-sm font-medium text-gray-600">Pending Requests</p>
+                    <p className="text-2xl font-bold text-gray-900">{dashboardMetrics?.leaves?.pending || 0}</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Two Column Layout */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            {/* Attendance Overview */}
             <Card>
               <div className="p-6 border-b border-gray-200">
                 <h2 className="text-lg font-semibold text-gray-900">Today's Attendance Overview</h2>
@@ -241,20 +258,27 @@ export default function HeadDashboard({ user }: HeadDashboardProps) {
                         >
                           {record.status === 'present' ? 'Present' : record.status === 'absent' ? 'Absent' : 'On Leave'}
                         </span>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleViewCv(record.user?.id || 0, record.user?.name || '')}
+                          className="text-blue-600 hover:text-blue-700 border-blue-200 hover:border-blue-300"
+                          title={`View CV for ${record.user?.name}`}
+                        >
+                          <FileText className="h-4 w-4 mr-1" />
+                          View CV
+                        </Button>
                       </div>
                     </div>
                   ))}
                 </div>
-
                 <Button className="w-full mt-6 bg-university-head text-white hover:bg-purple-800">
                   View Full Attendance Report
                 </Button>
               </CardContent>
             </Card>
-          </div>
 
-          {/* Leave Requests */}
-          <div>
+            {/* Pending Leave Requests */}
             <Card>
               <div className="p-6 border-b border-gray-200">
                 <h2 className="text-lg font-semibold text-gray-900">Pending Leave Requests</h2>
@@ -270,7 +294,7 @@ export default function HeadDashboard({ user }: HeadDashboardProps) {
                             {new Date(request.startDate).toLocaleDateString()} - {new Date(request.endDate).toLocaleDateString()}
                           </p>
                         </div>
-                        <span className="px-2 py-1 bg-university-warning bg-opacity-10 text-university-warning text-xs rounded-full">
+                        <span className="px-2 py-1 bg-university-warning bg-opacity-10 text-xs rounded-full" style={{ color: '#7c2d12' }}>
                           Pending
                         </span>
                       </div>
@@ -279,7 +303,7 @@ export default function HeadDashboard({ user }: HeadDashboardProps) {
                         <Button
                           size="sm"
                           className="flex-1 bg-university-success text-white hover:bg-green-700"
-                          onClick={() => handleLeaveResponse(request.id, "approved")}
+                          onClick={() => handleApprove(request.id)}
                           disabled={respondToLeaveMutation.isPending}
                         >
                           Approve
@@ -288,7 +312,7 @@ export default function HeadDashboard({ user }: HeadDashboardProps) {
                           size="sm"
                           variant="destructive"
                           className="flex-1"
-                          onClick={() => handleLeaveResponse(request.id, "rejected")}
+                          onClick={() => openRejectDialog(request)}
                           disabled={respondToLeaveMutation.isPending}
                         >
                           Reject
@@ -305,6 +329,44 @@ export default function HeadDashboard({ user }: HeadDashboardProps) {
           </div>
         </div>
       </div>
+
+      {/* Rejection Dialog */}
+      <Dialog open={isRejectDialogOpen} onOpenChange={setIsRejectDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Reject Leave Request</DialogTitle>
+            <DialogDescription>
+              Please provide a reason for rejecting this leave request. This will be sent to the staff member.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="rejection-reason" className="text-right">
+                Reason
+              </Label>
+              <Textarea
+                id="rejection-reason"
+                value={rejectionReason}
+                onChange={(e) => setRejectionReason(e.target.value)}
+                className="col-span-3"
+                placeholder="Enter rejection reason..."
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsRejectDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleRejectSubmit}
+              disabled={respondToLeaveMutation.isPending || !rejectionReason.trim()}
+            >
+              {respondToLeaveMutation.isPending ? "Rejecting..." : "Confirm Reject"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

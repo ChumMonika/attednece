@@ -18,5 +18,8 @@ export async function logout(): Promise<void> {
 
 export async function getCurrentUser() {
   const response = await apiRequest("GET", "/api/me");
+  if (!response.ok) {
+    throw new Error('Not authenticated');
+  }
   return response.json();
 }

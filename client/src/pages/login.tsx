@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useLocation } from "wouter";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,16 +12,22 @@ import { GraduationCap } from "lucide-react";
 export default function Login() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const [uniqueId, setUniqueId] = useState("");
   const [password, setPassword] = useState("");
 
   const loginMutation = useMutation({
     mutationFn: () => login(uniqueId, password),
     onSuccess: (data) => {
+      // Clear any cached queries
+      queryClient.clear();
+      
       toast({
         title: "Login successful",
         description: `Welcome back, ${data.name}!`,
       });
+      
+      // Client-side navigation to dashboard (no reload)
       setLocation(`/dashboard/${data.role}`);
     },
     onError: (error: any) => {

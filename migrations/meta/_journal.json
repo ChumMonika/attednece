@@ -1,0 +1,34 @@
+{
+  "version": "7",
+  "dialect": "mysql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "5",
+      "when": 1752060201959,
+      "tag": "0000_keen_inertia",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1764971548372,
+      "tag": "0001_slippery_hemingway",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1764971921920,
+      "tag": "0002_complete_sharon_carter",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "5",
+      "when": 1764972130392,
+      "tag": "0003_silky_loners",
+      "breakpoints": true
+    }
+  ]
+}

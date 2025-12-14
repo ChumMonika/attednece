@@ -1,24 +1,95 @@
+export interface Department {
+  id: number;
+  name: string;
+  shortName: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Major {
+  id: number;
+  name: string;
+  shortName: string;
+  departmentId: number;
+  createdAt: string;
+  updatedAt: string;
+  department?: Department;
+}
+
+export interface Class {
+  id: number;
+  name: string;
+  majorId: number;
+  year: number;
+  semester: number;
+  academicYear: string;
+  createdAt: string;
+  updatedAt: string;
+  major?: Major;
+}
+
+export interface Subject {
+  id: number;
+  name: string;
+  code: string;
+  credits?: number;
+  description?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Semester {
+  id: number;
+  name: string;
+  code: string;
+  startDate: string;
+  endDate: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface User {
   id: number;
   uniqueId: string;
   name: string;
   email?: string;
-  role: string;
-  department?: string;
+  role: "head" | "admin" | "hr_assistant" | "hr_backup" | "class_moderator" | "moderator" | "teacher" | "staff";
+  departmentId?: number;
+  classId?: number; // For class_moderator role
   workType?: string;
   schedule?: string;
-  subject?: string;
-  status: string;
+  status: "active" | "inactive" | "banned" | "pending" | "suspended";
+  createdAt: string;
+  updatedAt: string;
+  department?: Department;
+  class?: Class;
+}
+
+export interface ClassModerator {
+  id: number;
+  classId: number;
+  userId: number;
+  semesterId: number;
+  isPrimary: boolean;
+  createdAt: string;
+  class?: Class;
+  user?: User;
+  semester?: Semester;
 }
 
 export interface Attendance {
   id: number;
   userId: number;
   date: string;
-  status: string;
+  status: "present" | "absent" | "leave";
+  isLate: boolean;
   markedAt?: string;
   markedBy?: number;
+  scheduleId?: number;
+  notes?: string;
   user?: User;
+  schedule?: Schedule;
 }
 
 export interface LeaveRequest {
@@ -28,11 +99,28 @@ export interface LeaveRequest {
   startDate: string;
   endDate: string;
   reason: string;
-  status: string;
+  status: "pending" | "approved" | "rejected";
+  rejectionReason?: string;
   submittedAt: string;
   respondedAt?: string;
   respondedBy?: number;
   user?: User;
+}
+
+export interface Schedule {
+  id: number;
+  classId: number;
+  subjectId: number;
+  teacherId: number;
+  day: string;
+  startTime: string;
+  endTime: string;
+  room?: string;
+  createdAt: string;
+  updatedAt: string;
+  class?: Class;
+  subject?: Subject;
+  teacher?: User;
 }
 
 export interface TodaySchedule extends User {
@@ -45,4 +133,22 @@ export interface Stats {
   onLeave: number;
   pendingRequests: number;
   totalUsers: number;
+}
+
+export interface ScheduleWithTeacher extends Schedule {
+  teacher: User;
+  class: Class;
+  subject: Subject;
+  semester: Semester;
+}
+
+export interface ScheduleFormData {
+  semesterId: number;
+  classId: number;
+  subjectId: number;
+  teacherId: number;
+  dayOfWeek: string;
+  startTime: string;
+  endTime: string;
+  room: string;
 }
