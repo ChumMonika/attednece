@@ -27,12 +27,13 @@ SESSION_SECRET=your_session_secret
 ```powershell
 .\setup.bat
 ```
+This does EVERYTHING: creates database, tables, AND sample data.
 
 **Option B: Manual setup**
 ```powershell
-mysql -u root -p < database_setup.sql
+mysql -u root -p"" < database_setup_complete.sql
 ```
-(Just paste your password when prompted - only ONCE)
+(One file that does everything!)
 
 ### Step 4: Run Project
 ```powershell
