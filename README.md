@@ -4,23 +4,22 @@ A comprehensive system for managing university staff attendance, schedules, and 
 
 ## Quick Start
 
-### For New Team Members
-1. Clone the project: `git clone https://github.com/ChumMonika/attednece.git`
-2. Follow: **TEAM_SETUP.md** (3 simple steps)
+### 🆕 New Team Members
+1. Clone: `git clone https://github.com/ChumMonika/attednece.git`
+2. Read **GUIDE.md** (all setup steps inside)
 
-### For Existing Team Members (Update)
-1. Pull latest: `git pull origin main && npm install`
-2. Follow: **UPDATE_GUIDE.md**
+### 📦 Existing Team Members (Update Code)
+1. Pull & install: `git pull origin main && npm install`
+2. Start: `npm run dev`
 
 ---
 
-## Documentation
+## Documentation Files
 
-- **TEAM_SETUP.md** ← Start here! (Simplest setup guide)
-- **SETUP_GUIDE.md** ← Detailed setup with troubleshooting
-- **UPDATE_GUIDE.md** ← How to update when new code is pushed
-- **QUICK_REFERENCE.md** ← Copy-paste commands
-- **READY_FOR_TEAM.md** ← Comprehensive project overview
+| File | Purpose |
+|------|---------|
+| **GUIDE.md** | Setup + Update instructions (READ THIS!) |
+| **PROJECT_STRUCTURE.md** | Folder layout and file descriptions |
 
 ---
 
@@ -48,7 +47,7 @@ A comprehensive system for managing university staff attendance, schedules, and 
 ## Default Admin Credentials
 
 - **Username:** ADMIN001
-- **Password:** (Ask project lead)
+- **Password:** password123
 
 ---
 
