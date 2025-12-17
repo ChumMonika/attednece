@@ -29,6 +29,8 @@ export default function UserManagementTable({ onAddUser }: UserManagementTablePr
   const [isAddUserModalOpen, setIsAddUserModalOpen] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(10);
+  const [selectedUsers, setSelectedUsers] = useState<Set<number>>(new Set());
+  const [selectAll, setSelectAll] = useState(false);
 
   const { data: users, isLoading } = useQuery<User[]>({
     queryKey: ["/api/users"],
@@ -112,7 +114,12 @@ export default function UserManagementTable({ onAddUser }: UserManagementTablePr
       u.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       u.uniqueId.toLowerCase().includes(searchTerm.toLowerCase()) ||
       u.email?.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesRole = roleFilter === "all" || u.role === roleFilter;
+    
+    // Handle moderator filter to match both 'moderator' and 'class_moderator'
+    const matchesRole = roleFilter === "all" || 
+      u.role === roleFilter || 
+      (roleFilter === "moderator" && (u.role === "moderator" || u.role === "class_moderator"));
+    
     const matchesStatus = statusFilter === "all" || u.status === statusFilter;
     const matchesDepartment = departmentFilter === "all" || 
       (u.departmentId && u.departmentId.toString() === departmentFilter);
@@ -157,6 +164,66 @@ export default function UserManagementTable({ onAddUser }: UserManagementTablePr
     return labels[role] || role;
   };
 
+  const getDepartmentName = (departmentId: number | null | undefined) => {
+    if (!departmentId) return "System";
+    const department = departments?.find(d => d.id === departmentId);
+    return department?.shortName || "System";
+  };
+
+  const handleToggleSelectUser = (userId: number) => {
+    const newSelected = new Set(selectedUsers);
+    if (newSelected.has(userId)) {
+      newSelected.delete(userId);
+    } else {
+      newSelected.add(userId);
+    }
+    setSelectedUsers(newSelected);
+    setSelectAll(newSelected.size === paginatedUsers.length && paginatedUsers.length > 0);
+  };
+
+  const handleToggleSelectAll = () => {
+    if (selectAll) {
+      setSelectedUsers(new Set());
+      setSelectAll(false);
+    } else {
+      const allIds = new Set(paginatedUsers.map(u => u.id));
+      setSelectedUsers(allIds);
+      setSelectAll(true);
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedUsers.size === 0) {
+      toast({
+        title: "Error",
+        description: "Please select at least one user to delete",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (window.confirm(`Are you sure you want to delete ${selectedUsers.size} user(s)?`)) {
+      try {
+        for (const userId of Array.from(selectedUsers)) {
+          await apiRequest("DELETE", `/api/user/${userId}`);
+        }
+        queryClient.invalidateQueries({ queryKey: ["/api/users"] });
+        setSelectedUsers(new Set());
+        setSelectAll(false);
+        toast({
+          title: "Success",
+          description: `Successfully deleted ${selectedUsers.size} user(s)`,
+        });
+      } catch (error) {
+        toast({
+          title: "Error",
+          description: "Failed to delete some users",
+          variant: "destructive",
+        });
+      }
+    }
+  };
+
   return (
     <div className="p-8 pt-24 space-y-6 bg-gray-50 min-h-screen">
       {/* Header Section */}
@@ -168,6 +235,16 @@ export default function UserManagementTable({ onAddUser }: UserManagementTablePr
           </p>
         </div>
         <div className="flex gap-3">
+          {selectedUsers.size > 0 && (
+            <Button
+              onClick={handleBulkDelete}
+              variant="destructive"
+              className="bg-red-600 hover:bg-red-700 text-white"
+            >
+              <Trash2 className="w-4 h-4 mr-2" />
+              Delete Selected ({selectedUsers.size})
+            </Button>
+          )}
           <Button
             variant="outline"
             className="border-gray-300 hover:bg-gray-50"
@@ -210,7 +287,6 @@ export default function UserManagementTable({ onAddUser }: UserManagementTablePr
               <option value="head">Head</option>
               <option value="teacher">Teacher</option>
               <option value="moderator">Moderator</option>
-              <option value="class_moderator">Moderator</option>
               <option value="staff">Staff</option>
               <option value="hr_assistant">HR Assistant</option>
             </select>
@@ -250,7 +326,12 @@ export default function UserManagementTable({ onAddUser }: UserManagementTablePr
             <thead className="bg-gray-50 border-b-2 border-gray-200">
               <tr>
                 <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">
-                  <input type="checkbox" className="rounded border-gray-300" />
+                  <input 
+                    type="checkbox" 
+                    className="rounded border-gray-300 cursor-pointer w-4 h-4"
+                    checked={selectAll}
+                    onChange={handleToggleSelectAll}
+                  />
                 </th>
                 <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">
                   FULL NAME
@@ -295,7 +376,12 @@ export default function UserManagementTable({ onAddUser }: UserManagementTablePr
                 paginatedUsers.map((user) => (
                   <tr key={user.id} className="hover:bg-gray-50 transition-colors">
                     <td className="px-6 py-4">
-                      <input type="checkbox" className="rounded border-gray-300" />
+                      <input 
+                        type="checkbox" 
+                        className="rounded border-gray-300 cursor-pointer w-4 h-4"
+                        checked={selectedUsers.has(user.id)}
+                        onChange={() => handleToggleSelectUser(user.id)}
+                      />
                     </td>
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-3">
@@ -327,7 +413,7 @@ export default function UserManagementTable({ onAddUser }: UserManagementTablePr
                     </td>
                     <td className="px-6 py-4">
                       <span className="text-[14px] text-gray-700">
-                        {user.department?.shortName || "—"}
+                        {getDepartmentName(user.departmentId)}
                       </span>
                     </td>
                     <td className="px-6 py-4">

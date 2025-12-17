@@ -60,6 +60,7 @@ export default function AddUserModal({ isOpen, onClose, editingUser }: AddUserMo
     majorId: "",
     classId: "",
     schedule: "08:00-17:00",
+    status: "active",
   });
 
   // Generate User ID based on role
@@ -147,6 +148,7 @@ export default function AddUserModal({ isOpen, onClose, editingUser }: AddUserMo
         majorId: majorId,
         classId: editingUser.classId?.toString() || "",
         schedule: editingUser.schedule || "08:00-17:00",
+        status: editingUser.status || "active",
       });
     } else {
       setFormData({
@@ -159,6 +161,7 @@ export default function AddUserModal({ isOpen, onClose, editingUser }: AddUserMo
         majorId: "",
         classId: "",
         schedule: "08:00-17:00",
+        status: "active",
       });
     }
   }, [editingUser, isOpen, classes]);
@@ -243,7 +246,7 @@ export default function AddUserModal({ isOpen, onClose, editingUser }: AddUserMo
       uniqueId: formData.uniqueId,
       email: formData.email,
       role: formData.role,
-      status: "active",
+      status: formData.status,
       departmentId: formData.departmentId ? parseInt(formData.departmentId) : null,
       classId: formData.classId ? parseInt(formData.classId) : null,
       schedule: showSchedule ? formData.schedule : null,
@@ -396,6 +399,25 @@ export default function AddUserModal({ isOpen, onClose, editingUser }: AddUserMo
               </p>
             </div>
           )}
+
+          {/* Status */}
+          <div>
+            <Label htmlFor="status" className="block text-sm font-semibold text-gray-800 mb-2">
+              Status <span className="text-red-500">*</span>
+            </Label>
+            <Select
+              value={formData.status}
+              onValueChange={(value) => setFormData(prev => ({ ...prev, status: value }))}
+            >
+              <SelectTrigger className="h-11">
+                <SelectValue placeholder="Select Status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="active">Active</SelectItem>
+                <SelectItem value="inactive">Inactive</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
 
           {/* Divider for Dynamic Fields */}
           {showDepartment && (

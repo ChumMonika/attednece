@@ -35,7 +35,7 @@ import {
 } from "@shared/schema";
 import { drizzle } from "drizzle-orm/mysql2";
 import mysql from "mysql2";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, ne } from "drizzle-orm";
 import fs from "fs";
 import path from "path";
 
@@ -68,7 +68,10 @@ export interface IStorage {
   getSchedulesByDay(day: string): Promise<Schedule[]>;
   getSchedulesByTeacher(teacherId: number): Promise<Schedule[]>;
   getSchedulesByMajor(major: string): Promise<Schedule[]>;
+  getSchedulesByClass(classId: number): Promise<Schedule[]>;
   createSchedule(schedule: InsertSchedule): Promise<Schedule>;
+  createBulkSchedules(schedules: InsertSchedule[]): Promise<Schedule[]>;
+  validateScheduleConflict(teacherId: number, day: string, startTime: string, endTime: string, excludeId?: number, classId?: number): Promise<{ hasConflict: boolean; type?: string; details?: string }>;
   updateSchedule(id: number, updates: Partial<Schedule>): Promise<Schedule | undefined>;
   deleteSchedule(id: number): Promise<boolean>;
   getScheduleById(id: number): Promise<Schedule | undefined>;
@@ -670,6 +673,126 @@ export class MemStorage implements IStorage {
     return this.schedules.delete(id);
   }
 
+  async validateScheduleConflict(
+    teacherId: number,
+    day: string,
+    startTime: string,
+    endTime: string,
+    excludeScheduleId?: number,
+    classId?: number
+  ): Promise<{ hasConflict: boolean; type?: string; details?: string }> {
+    // Get all schedules for this teacher on this day
+    const teacherSchedules = Array.from(this.schedules.values()).filter(
+      schedule => 
+        schedule.teacherId === teacherId &&
+        schedule.day === day &&
+        (!excludeScheduleId || schedule.id !== excludeScheduleId)
+    );
+
+    // Check for teacher time conflicts
+    for (const schedule of teacherSchedules) {
+      const existingStart = schedule.startTime;
+      const existingEnd = schedule.endTime;
+      
+      const hasConflict = (
+        (startTime >= existingStart && startTime < existingEnd) || 
+        (endTime > existingStart && endTime <= existingEnd) || 
+        (startTime <= existingStart && endTime >= existingEnd)
+      );
+      
+      if (hasConflict) {
+        return { 
+          hasConflict: true, 
+          type: 'teacher', 
+          details: `Teacher already scheduled on ${day} at ${existingStart}-${existingEnd}` 
+        };
+      }
+    }
+
+    // Check for class time conflicts if classId provided
+    if (classId) {
+      const classSchedules = Array.from(this.schedules.values()).filter(
+        schedule => 
+          schedule.classId === classId &&
+          schedule.day === day &&
+          (!excludeScheduleId || schedule.id !== excludeScheduleId)
+      );
+
+      for (const schedule of classSchedules) {
+        const existingStart = schedule.startTime;
+        const existingEnd = schedule.endTime;
+        
+        const hasConflict = (
+          (startTime >= existingStart && startTime < existingEnd) || 
+          (endTime > existingStart && endTime <= existingEnd) || 
+          (startTime <= existingStart && endTime >= existingEnd)
+        );
+        
+        if (hasConflict) {
+          return { 
+            hasConflict: true, 
+            type: 'class', 
+            details: `Class already scheduled on ${day} at ${existingStart}-${existingEnd}` 
+          };
+        }
+      }
+    }
+    
+    return { hasConflict: false };
+  }
+
+  async createBulkSchedules(scheduleList: InsertSchedule[]): Promise<Schedule[]> {
+    const createdSchedules: Schedule[] = [];
+    const conflicts: string[] = [];
+
+    // Validate all schedules first
+    for (let i = 0; i < scheduleList.length; i++) {
+      const schedule = scheduleList[i];
+      const conflictResult = await this.validateScheduleConflict(
+        schedule.teacherId,
+        schedule.day,
+        schedule.startTime,
+        schedule.endTime,
+        undefined,
+        schedule.classId
+      );
+      
+      if (conflictResult.hasConflict) {
+        conflicts.push(`Slot ${i + 1}: ${conflictResult.type} conflict - ${conflictResult.details}`);
+      }
+
+      // Check for duplicate subject+day within the same class
+      const duplicates = scheduleList.filter((s, idx) => 
+        idx !== i && 
+        s.classId === schedule.classId && 
+        s.subjectId === schedule.subjectId && 
+        s.day === schedule.day
+      );
+      if (duplicates.length > 0) {
+        conflicts.push(`Slot ${i + 1}: Duplicate subject on same day for this class`);
+      }
+    }
+
+    if (conflicts.length > 0) {
+      throw new Error(`Schedule conflicts detected:\n${conflicts.join('\n')}`);
+    }
+
+    // Insert all schedules
+    for (const schedule of scheduleList) {
+      const id = this.currentScheduleId++;
+      const newSchedule: Schedule = {
+        ...schedule,
+        id,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+      this.schedules.set(id, newSchedule);
+      createdSchedules.push(newSchedule);
+    }
+
+    return createdSchedules;
+  }
+
   async getScheduleById(id: number): Promise<Schedule | undefined> {
     return this.schedules.get(id);
   }
@@ -999,8 +1122,24 @@ export class MySQLStorage implements IStorage {
   }
 
   async deleteUser(id: number): Promise<boolean> {
-    const result = await this.db.delete(users).where(eq(users.id, id));
-    return (result as any).affectedRows > 0;
+    try {
+      // Check if user exists first
+      const existingUser = await this.db.select().from(users).where(eq(users.id, id)).limit(1);
+      
+      if (existingUser.length === 0) {
+        // User doesn't exist
+        return false;
+      }
+      
+      // Delete the user
+      await this.db.delete(users).where(eq(users.id, id));
+      
+      // If no error was thrown, deletion was successful
+      return true;
+    } catch (error) {
+      console.error(`❌ Error deleting user ${id}:`, error);
+      return false;
+    }
   }
 
   // Attendance management
@@ -1275,6 +1414,151 @@ export class MySQLStorage implements IStorage {
   async deleteSchedule(id: number): Promise<boolean> {
     const result = await this.db.delete(schedules).where(eq(schedules.id, id));
     return (result as any).affectedRows > 0;
+  }
+
+  async getSchedulesByClass(classId: number): Promise<Schedule[]> {
+    console.log(`🔍 MySQL Query: SELECT * FROM schedules WHERE class_id = ${classId}`);
+    const result = await this.db.select().from(schedules).where(eq(schedules.classId, classId));
+    console.log(`📊 MySQL Result: Found ${result.length} schedules for class ${classId}`);
+    return result;
+  }
+
+  async validateScheduleConflict(
+    teacherId: number,
+    day: string,
+    startTime: string,
+    endTime: string,
+    excludeScheduleId?: number,
+    classId?: number
+  ): Promise<{ hasConflict: boolean; type?: string; details?: string }> {
+    console.log(`🔍 MySQL Query: Checking schedule conflict for teacher ${teacherId} on ${day} ${startTime}-${endTime}`);
+    
+    // Get all schedules for this teacher on this day
+    const teacherSchedules = await this.db.select()
+      .from(schedules)
+      .where(
+        and(
+          eq(schedules.teacherId, teacherId),
+          eq(schedules.day, day),
+          excludeScheduleId ? ne(schedules.id, excludeScheduleId) : undefined
+        )
+      );
+
+    // Check for teacher time conflicts
+    for (const schedule of teacherSchedules) {
+      const existingStart = schedule.startTime;
+      const existingEnd = schedule.endTime;
+      
+      const hasConflict = (
+        (startTime >= existingStart && startTime < existingEnd) || 
+        (endTime > existingStart && endTime <= existingEnd) || 
+        (startTime <= existingStart && endTime >= existingEnd)
+      );
+      
+      if (hasConflict) {
+        console.log(`⚠️ Teacher conflict found: ${existingStart}-${existingEnd} overlaps with ${startTime}-${endTime}`);
+        return { 
+          hasConflict: true, 
+          type: 'teacher', 
+          details: `Teacher already scheduled on ${day} at ${existingStart}-${existingEnd}` 
+        };
+      }
+    }
+
+    // Check for class time conflicts if classId provided
+    if (classId) {
+      const classSchedules = await this.db.select()
+        .from(schedules)
+        .where(
+          and(
+            eq(schedules.classId, classId),
+            eq(schedules.day, day),
+            excludeScheduleId ? ne(schedules.id, excludeScheduleId) : undefined
+          )
+        );
+
+      for (const schedule of classSchedules) {
+        const existingStart = schedule.startTime;
+        const existingEnd = schedule.endTime;
+        
+        const hasConflict = (
+          (startTime >= existingStart && startTime < existingEnd) || 
+          (endTime > existingStart && endTime <= existingEnd) || 
+          (startTime <= existingStart && endTime >= existingEnd)
+        );
+        
+        if (hasConflict) {
+          console.log(`⚠️ Class conflict found: ${existingStart}-${existingEnd} overlaps with ${startTime}-${endTime}`);
+          return { 
+            hasConflict: true, 
+            type: 'class', 
+            details: `Class already scheduled on ${day} at ${existingStart}-${existingEnd}` 
+          };
+        }
+      }
+    }
+    
+    console.log(`✅ No conflicts found for teacher ${teacherId} on ${day} ${startTime}-${endTime}`);
+    return { hasConflict: false };
+  }
+
+  async createBulkSchedules(scheduleList: InsertSchedule[]): Promise<Schedule[]> {
+    console.log(`🔍 MySQL Bulk Create: Inserting ${scheduleList.length} schedules`);
+    
+    const createdSchedules: Schedule[] = [];
+    const conflicts: string[] = [];
+    const now = new Date();
+
+    // Validate all schedules first
+    for (let i = 0; i < scheduleList.length; i++) {
+      const schedule = scheduleList[i];
+      const conflictResult = await this.validateScheduleConflict(
+        schedule.teacherId,
+        schedule.day,
+        schedule.startTime,
+        schedule.endTime,
+        undefined,
+        schedule.classId
+      );
+      
+      if (conflictResult.hasConflict) {
+        conflicts.push(`Slot ${i + 1}: ${conflictResult.type} conflict - ${conflictResult.details}`);
+      }
+
+      // Check for duplicate subject+day within the same class
+      const duplicates = scheduleList.filter((s, idx) => 
+        idx !== i && 
+        s.classId === schedule.classId && 
+        s.subjectId === schedule.subjectId && 
+        s.day === schedule.day
+      );
+      if (duplicates.length > 0) {
+        conflicts.push(`Slot ${i + 1}: Duplicate subject on same day for this class`);
+      }
+    }
+
+    if (conflicts.length > 0) {
+      throw new Error(`Schedule conflicts detected:\n${conflicts.join('\n')}`);
+    }
+
+    // Insert all schedules
+    for (const schedule of scheduleList) {
+      const result = await this.db.insert(schedules).values({
+        ...schedule,
+        createdAt: now,
+        updatedAt: now,
+      });
+      
+      const newSchedule = await this.db.select()
+        .from(schedules)
+        .where(eq(schedules.id, result[0].insertId as number))
+        .limit(1);
+      
+      createdSchedules.push(newSchedule[0]);
+    }
+
+    console.log(`✅ MySQL Bulk Create: Successfully inserted ${createdSchedules.length} schedules`);
+    return createdSchedules;
   }
 
   async getScheduleById(id: number): Promise<Schedule | undefined> {

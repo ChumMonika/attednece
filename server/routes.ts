@@ -11,6 +11,7 @@ import {
   respondLeaveRequestSchema,
   insertScheduleSchema,
   updateScheduleSchema,
+  bulkScheduleSchema,
   insertDepartmentSchema,
   insertMajorSchema,
   insertClassSchema,
@@ -629,11 +630,49 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       console.log("Found schedules:", schedules.length);
 
-      // Get teacher information for each schedule
+      // Get classes, majors, and teachers for enriched response
+      const classes = await storage.getAllClasses();
+      const majors = await storage.getAllMajors();
+      const classMap = new Map(classes.map(c => [c.id, c]));
+      const majorMap = new Map(majors.map(m => [m.id, m]));
+
+      // Get teacher information and add class fullClassName for each schedule
       const schedulesWithTeachers = await Promise.all(
         schedules.map(async (schedule) => {
           const teacher = await storage.getUser(schedule.teacherId);
-          return { ...schedule, teacher };
+          const classInfo = classMap.get(schedule.classId);
+          
+          let classLabel = 'Unknown Class';
+          let fullClassName = 'Unknown Class'; // Alias
+          let displayClassName = 'Unknown Class';
+          let majorShort = 'Unknown';
+          
+          if (classInfo) {
+            const major = majorMap.get(classInfo.majorId);
+            majorShort = major?.shortName || major?.name || 'Unknown';
+            const majorFull = major?.name || 'Unknown';
+            const groupStr = (classInfo as any).group ? ` ${(classInfo as any).group}` : '';
+            
+            // Compact format (classLabel - primary format)
+            classLabel = `${majorShort} Y${classInfo.year}S${classInfo.semester}${groupStr}`;
+            fullClassName = classLabel; // Alias for backward compatibility
+            
+            // Readable format for dropdowns
+            const yearText = `Year ${classInfo.year}`;
+            const semesterText = `Semester ${classInfo.semester}`;
+            const groupText = (classInfo as any).group || '';
+            displayClassName = `${majorFull} - ${yearText} - ${semesterText}${groupText ? ' - Group ' + groupText : ''}`;
+          }
+          
+          return { 
+            ...schedule, 
+            teacher,
+            classLabel,       // New: BDSE Y2S2 M1
+            fullClassName,    // Alias
+            displayClassName,
+            majorShort,       // For hierarchical filtering
+            classInfo
+          };
         })
       );
 
@@ -683,6 +722,50 @@ export async function registerRoutes(app: Express): Promise<Server> {
         message: "Invalid request data", 
         error: (error as Error).message,
         details: "Check that all required fields are provided and in correct format"
+      });
+    }
+  });
+
+  // Bulk create schedules with conflict validation
+  app.post("/api/schedules/bulk", requireAuth, async (req, res) => {
+    try {
+      console.log("=== BULK SCHEDULE CREATE DEBUG ===");
+      console.log("Request received at:", new Date().toISOString());
+      console.log("User role:", (req.session as any).userRole);
+      console.log("Request body:", req.body);
+      
+      if ((req.session as any).userRole !== 'admin') {
+        console.log("Access denied: User is not admin");
+        return res.status(403).json({ message: "Forbidden - Admin access required" });
+      }
+
+      const bulkData = bulkScheduleSchema.parse(req.body);
+      console.log(`Parsed bulk data: ${bulkData.schedules.length} schedules to create`);
+      
+      const createdSchedules = await storage.createBulkSchedules(bulkData.schedules);
+      console.log(`Successfully created ${createdSchedules.length} schedules`);
+
+      // Get teacher information for all schedules
+      const teacherIds = [...new Set(createdSchedules.map(s => s.teacherId))];
+      const teachers = await Promise.all(teacherIds.map(id => storage.getUser(id)));
+      const teacherMap = new Map(teachers.map(t => t ? [t.id, t] : [0, null]));
+
+      const schedulesWithTeachers = createdSchedules.map(schedule => ({
+        ...schedule,
+        teacher: teacherMap.get(schedule.teacherId)
+      }));
+
+      console.log("=== END BULK SCHEDULE CREATE DEBUG ===");
+      res.json(schedulesWithTeachers);
+    } catch (error) {
+      console.error("=== BULK SCHEDULE CREATE ERROR ===");
+      console.error("Error:", error);
+      console.error("Error message:", (error as Error).message);
+      console.error("=== END BULK SCHEDULE CREATE ERROR ===");
+      res.status(400).json({ 
+        message: "Bulk schedule creation failed", 
+        error: (error as Error).message,
+        details: "Check for schedule conflicts or invalid data"
       });
     }
   });
@@ -1384,7 +1467,37 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ message: "Admin access required" });
       }
       const classes = await storage.getAllClasses();
-      res.json(classes);
+      
+      // Get all majors to build fullClassName
+      const majors = await storage.getAllMajors();
+      const majorMap = new Map(majors.map(m => [m.id, m]));
+      
+      // Add fullClassName to each class
+      const classesWithFullName = classes.map(cls => {
+        const major = majorMap.get(cls.majorId);
+        const majorShort = major?.shortName || major?.name || 'Unknown';
+        const majorFull = major?.name || 'Unknown';
+        const groupStr = (cls as any).group ? ` ${(cls as any).group}` : '';
+        
+        // Compact format for database and internal use (classLabel)
+        const classLabel = `${majorShort} Y${cls.year}S${cls.semester}${groupStr}`;
+        
+        // Readable format for dropdowns and UI display
+        const yearText = `Year ${cls.year}`;
+        const semesterText = `Semester ${cls.semester}`;
+        const groupText = (cls as any).group || '';
+        const displayClassName = `${majorFull} - ${yearText} - ${semesterText}${groupText ? ' - Group ' + groupText : ''}`;
+        
+        return {
+          ...cls,
+          classLabel,          // New: BDSE Y2S2 M1
+          fullClassName: classLabel, // Alias for backward compatibility
+          displayClassName,    // Readable format
+          majorShort          // For quick access in filtering
+        };
+      });
+      
+      res.json(classesWithFullName);
     } catch (error) {
       res.status(500).json({ message: "Server error" });
     }
@@ -1396,7 +1509,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ message: "Admin access required" });
       }
       const classData = insertClassSchema.parse(req.body);
-      const classObj = await storage.createClass(classData);
+      
+      // Auto-generate class name: "MAJORSHORT YyearSsemester GROUP" (uppercase)
+      const major = await storage.getMajorById(classData.majorId);
+      if (!major) {
+        return res.status(400).json({ message: "Invalid major ID" });
+      }
+      const generatedName = `${major.shortName} Y${classData.year}S${classData.semester} ${classData.group.toUpperCase()}`;
+      
+      const classObj = await storage.createClass({
+        ...classData,
+        name: generatedName,
+        group: classData.group.toUpperCase() // Ensure group is uppercase
+      });
       res.json(classObj);
     } catch (error) {
       res.status(400).json({ message: "Invalid request data", error: (error as Error).message });
@@ -1409,7 +1534,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ message: "Admin access required" });
       }
       const id = parseInt(req.params.id);
-      const updated = await storage.updateClass(id, req.body);
+      const updates = req.body;
+      
+      // If any component that affects the name changes, regenerate it
+      if (updates.majorId || updates.year || updates.semester || updates.group) {
+        const existingClass = await storage.getClassById(id);
+        if (!existingClass) {
+          return res.status(404).json({ message: "Class not found" });
+        }
+        
+        const finalMajorId = updates.majorId || existingClass.majorId;
+        const major = await storage.getMajorById(finalMajorId);
+        if (!major) {
+          return res.status(400).json({ message: "Invalid major ID" });
+        }
+        
+        const finalYear = updates.year || existingClass.year;
+        const finalSemester = updates.semester || existingClass.semester;
+        const finalGroup = (updates.group || existingClass.group || '').toUpperCase();
+        
+        updates.name = `${major.shortName} Y${finalYear}S${finalSemester} ${finalGroup}`;
+        updates.group = finalGroup; // Ensure group is also uppercase in updates
+      }
+      
+      const updated = await storage.updateClass(id, updates);
       res.json(updated);
     } catch (error) {
       res.status(400).json({ message: "Failed to update class" });

@@ -24,11 +24,13 @@ export const majors = mysqlTable("majors", {
 
 export const classes = mysqlTable("classes", {
   id: int("id").primaryKey().autoincrement(),
-  name: varchar("name", { length: 255 }).notNull(), // e.g., "DSE Y1S1"
+  name: varchar("name", { length: 255 }).notNull(), // Auto-generated: e.g., "BDSE Y2S2 M1"
   majorId: int("major_id").notNull().references(() => majors.id, { onDelete: "cascade" }),
   year: int("year").notNull(), // Academic year: 1, 2, 3, 4
   semester: int("semester").notNull(), // 1 or 2
   academicYear: varchar("academic_year", { length: 20 }).notNull(), // "2025-2026"
+  group: varchar("group", { length: 10 }).notNull(), // REQUIRED: M1, M2, A1, A2, etc.
+  isActive: boolean("is_active").notNull().default(true), // For semester rollover
   createdAt: datetime("created_at").notNull(),
   updatedAt: datetime("updated_at").notNull(),
 }, (table) => ({
@@ -176,12 +178,12 @@ export const insertMajorSchema = createInsertSchema(majors, {
 }).omit({ createdAt: true, updatedAt: true });
 
 export const insertClassSchema = createInsertSchema(classes, {
-  name: z.string().min(1, "Class name is required"),
   majorId: z.number(),
   year: z.number().min(1).max(4),
   semester: z.number().min(1).max(2),
   academicYear: z.string().min(1, "Academic year is required"),
-}).omit({ createdAt: true, updatedAt: true });
+  group: z.string().min(1, "Group is required").max(10).regex(/^[A-Z0-9]+$/, "Group must be uppercase letters/numbers (e.g., M1, M2, A1)"),
+}).omit({ name: true, createdAt: true, updatedAt: true }); // name will be auto-generated
 
 export const insertSubjectSchema = createInsertSchema(subjects, {
   name: z.string().min(1, "Subject name is required"),
@@ -228,6 +230,11 @@ export const insertScheduleSchema = createInsertSchema(schedules, {
 }).omit({ createdAt: true, updatedAt: true });
 
 export const updateScheduleSchema = insertScheduleSchema.partial();
+
+// Bulk schedule creation schema
+export const bulkScheduleSchema = z.object({
+  schedules: z.array(insertScheduleSchema).min(1, "At least one schedule is required"),
+});
 
 // Type exports
 export type User = typeof users.$inferSelect;

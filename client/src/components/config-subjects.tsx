@@ -1,4 +1,4 @@
-import { useState } from "react";
+import React, { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -23,6 +23,8 @@ export default function SubjectsConfig() {
   });
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(10);
+  const [selectedSubjects, setSelectedSubjects] = useState<Set<number>>(new Set());
+  const [selectAll, setSelectAll] = useState(false);
 
   const { data: subjects, isLoading } = useQuery<Subject[]>({
     queryKey: ["/api/subjects"],
@@ -75,6 +77,59 @@ export default function SubjectsConfig() {
       });
     },
   });
+
+  const handleToggleSelectSubject = (subjectId: number) => {
+    const newSelected = new Set(selectedSubjects);
+    if (newSelected.has(subjectId)) {
+      newSelected.delete(subjectId);
+    } else {
+      newSelected.add(subjectId);
+    }
+    setSelectedSubjects(newSelected);
+  };
+
+  const handleToggleSelectAll = () => {
+    if (selectAll) {
+      setSelectedSubjects(new Set());
+      setSelectAll(false);
+    } else {
+      const allIds = new Set(paginatedSubjects?.map(s => s.id) || []);
+      setSelectedSubjects(allIds);
+      setSelectAll(true);
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedSubjects.size === 0) {
+      toast({
+        title: "Error",
+        description: "Please select at least one subject to delete",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (window.confirm(`Are you sure you want to delete ${selectedSubjects.size} subject(s)?`)) {
+      try {
+        for (const subjectId of Array.from(selectedSubjects)) {
+          await apiRequest("DELETE", `/api/subjects/${subjectId}`);
+        }
+        queryClient.invalidateQueries({ queryKey: ["/api/subjects"] });
+        setSelectedSubjects(new Set());
+        setSelectAll(false);
+        toast({
+          title: "Success",
+          description: `Successfully deleted ${selectedSubjects.size} subject(s)`,
+        });
+      } catch (error) {
+        toast({
+          title: "Error",
+          description: "Failed to delete some subjects",
+          variant: "destructive",
+        });
+      }
+    }
+  };
 
   const openDialog = (subject?: Subject) => {
     if (subject) {
@@ -129,14 +184,26 @@ export default function SubjectsConfig() {
           <h1 className="text-2xl font-bold text-gray-900">Subjects</h1>
           <p className="text-sm text-gray-600 mt-1">Manage global subject catalog (reusable across majors)</p>
         </div>
-        <Button
-          onClick={() => openDialog()}
-          className="bg-purple-600 hover:bg-purple-700 text-white shadow-md"
-          size="lg"
-        >
-          <Plus className="w-5 h-5 mr-2" />
-          Add Subject
-        </Button>
+        <div className="flex items-center gap-2">
+          {selectedSubjects.size > 0 && (
+            <Button
+              onClick={handleBulkDelete}
+              variant="destructive"
+              size="lg"
+            >
+              <Trash2 className="w-5 h-5 mr-2" />
+              Delete Selected ({selectedSubjects.size})
+            </Button>
+          )}
+          <Button
+            onClick={() => openDialog()}
+            className="bg-purple-600 hover:bg-purple-700 text-white shadow-md"
+            size="lg"
+          >
+            <Plus className="w-5 h-5 mr-2" />
+            Add Subject
+          </Button>
+        </div>
       </div>
 
       <Card className="p-6">
@@ -144,6 +211,14 @@ export default function SubjectsConfig() {
           <table className="w-full">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
+                <th className="px-4 py-3 text-left">
+                  <input
+                    type="checkbox"
+                    checked={selectAll}
+                    onChange={handleToggleSelectAll}
+                    className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  />
+                </th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
                   Subject Code
                 </th>
@@ -177,6 +252,14 @@ export default function SubjectsConfig() {
               ) : (
                 paginatedSubjects?.map((subject) => (
                   <tr key={subject.id} className="hover:bg-gray-50 transition-colors">
+                    <td className="px-4 py-4">
+                      <input
+                        type="checkbox"
+                        checked={selectedSubjects.has(subject.id)}
+                        onChange={() => handleToggleSelectSubject(subject.id)}
+                        className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                      />
+                    </td>
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-2">
                         <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-green-500 to-teal-600 flex items-center justify-center">
@@ -223,72 +306,46 @@ export default function SubjectsConfig() {
 
         {/* Pagination Controls */}
         {subjects && subjects.length > 0 && (
-          <div className="border-t border-gray-100 px-6 py-4 flex items-center justify-between">
-            <div className="text-sm text-gray-600">
-              Showing {startIndex + 1} to {Math.min(endIndex, subjects.length)} of {subjects.length} subjects
-            </div>
+          <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-between bg-gray-50">
             <div className="flex items-center gap-4">
+              <span className="text-sm text-gray-700">
+                Showing {startIndex + 1} to {Math.min(endIndex, subjects.length)} of {subjects.length} results
+              </span>
               <div className="flex items-center gap-2">
-                <span className="text-sm text-gray-600">Rows per page:</span>
+                <span className="text-sm text-gray-700">Rows per page:</span>
                 <select
                   value={rowsPerPage}
                   onChange={(e) => {
                     setRowsPerPage(Number(e.target.value));
                     setCurrentPage(1);
                   }}
-                  className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                  className="px-2 py-1 border border-gray-300 rounded-md bg-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
                   <option value={10}>10</option>
                   <option value={20}>20</option>
                   <option value={50}>50</option>
                 </select>
               </div>
-              <div className="flex items-center gap-1">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                  disabled={currentPage === 1}
-                  className="px-3 py-1.5"
-                >
-                  Previous
-                </Button>
-                {Array.from({ length: totalPages }, (_, i) => i + 1)
-                  .filter(page => {
-                    if (totalPages <= 7) return true;
-                    if (page === 1 || page === totalPages) return true;
-                    if (page >= currentPage - 1 && page <= currentPage + 1) return true;
-                    return false;
-                  })
-                  .map((page, index, array) => (
-                    <React.Fragment key={page}>
-                      {index > 0 && array[index - 1] !== page - 1 && (
-                        <span className="px-2 text-gray-400">...</span>
-                      )}
-                      <Button
-                        variant={currentPage === page ? "default" : "outline"}
-                        size="sm"
-                        onClick={() => setCurrentPage(page)}
-                        className={`px-3 py-1.5 ${
-                          currentPage === page
-                            ? "bg-green-600 text-white hover:bg-green-700"
-                            : ""
-                        }`}
-                      >
-                        {page}
-                      </Button>
-                    </React.Fragment>
-                  ))}
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                  disabled={currentPage === totalPages}
-                  className="px-3 py-1.5"
-                >
-                  Next
-                </Button>
-              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                disabled={currentPage === 1}
+                className="h-8"
+              >
+                Previous
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                disabled={currentPage === totalPages}
+                className="h-8"
+              >
+                Next
+              </Button>
             </div>
           </div>
         )}

@@ -23,6 +23,10 @@ export interface Class {
   year: number;
   semester: number;
   academicYear: string;
+  group: string; // REQUIRED: M1, M2, A5, etc.
+  classLabel?: string; // Auto-generated compact format: "BDSE Y2S2 M1"
+  displayClassName?: string; // Readable format for dropdowns
+  majorShort?: string; // Cached major short name for quick access
   createdAt: string;
   updatedAt: string;
   major?: Major;
@@ -121,6 +125,11 @@ export interface Schedule {
   class?: Class;
   subject?: Subject;
   teacher?: User;
+  classLabel?: string; // Compact format: "BDSE Y2S2 M1"
+  displayClassName?: string; // Readable format for UI
+  fullClassName?: string; // Alias for classLabel
+  majorShort?: string; // For hierarchical filtering
+  classInfo?: Class; // Full class information
 }
 
 export interface TodaySchedule extends User {
