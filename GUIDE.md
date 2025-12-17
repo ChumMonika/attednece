@@ -59,9 +59,11 @@ Done! That's it! ✅
 
 ---
 
-## 🆘 Troubleshooting
-
-**"Access denied for user 'root'@'localhost'"?**
+**"Database error: Unknown column"?**
+- Database schema might not be synced
+- Try restarting: Stop `npm run dev` and run it again
+- Or reset database: `mysql -u root -p"" < database_setup.sql`
+- Then: `npm run dev`
 - Your `.env` password is WRONG
 - Edit `.env` file and put your ACTUAL MySQL root password
 - Restart: `npm run dev`
