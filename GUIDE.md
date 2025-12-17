@@ -1,14 +1,15 @@
 # Setup & Update Guide
 
-## 🆕 First Time Setup
-### Step 1: Clone Project if not yet
+## 🆕 First Time Setup (New Members)
+
+### Step 1: Clone Project
 ```powershell
 git clone https://github.com/ChumMonika/attednece.git
 cd attednece
 npm install
 ```
 
-### Step 2: Create `.env` File if not have
+### Step 2: Create `.env` File
 Create a file named `.env` in the project root:
 ```env
 DB_HOST=localhost
@@ -27,53 +28,57 @@ SESSION_SECRET=your_session_secret
 ```powershell
 .\setup.bat
 ```
-This does EVERYTHING: creates database, tables, AND sample data.
 
 **Option B: Manual setup**
 ```powershell
 mysql -u root -p"" < database_setup_complete.sql
 ```
-(One file that does everything!)
 
 ### Step 4: Run Project
 ```powershell
 npm run dev
 ```
-Open: **http://localhost:5000**  
-Login: `admin` / `admin123`
+
+Open: **http://localhost:5000**
+
+**Login Credentials:**
+- Admin: `ADMIN001` / `admin123`
+- Head: `HEAD001` / `head123`
+- Teacher: `TEACHER001` / `teacher123`
 
 ---
 
 ## 📦 Update Existing Project (Existing Members)
 
-Already have the project? Just do this:
+Already have the project running? Choose ONE option:
 
+### Option 1: Just Update Code (RECOMMENDED)
 ```powershell
 git pull origin main
 npm install
 npm run dev
 ```
 
-**Your `.env` file stays the same!** Don't change it. Just pull, install, and run!
+✅ Keeps your existing database  
+✅ Only updates the code  
+✅ Fastest way!
 
-Done! That's it! ✅
+### Option 2: Reset Database with Fresh Data
+```powershell
+git pull origin main
+npm install
+mysql -u root -p"" < database_setup_complete.sql
+npm run dev
+```
+
+⚠️ **WARNING**: Deletes ALL existing data and creates fresh sample data  
+✅ Use only if you want to start fresh!
+
+**Most of the time, use Option 1!**
 
 ---
 
-**"Database error: Unknown column"?**
-- Database schema might not be synced
-- Try restarting: Stop `npm run dev` and run it again
-- Or reset database: `mysql -u root -p"" < database_setup.sql`
-- Then: `npm run dev`
-- Your `.env` password is WRONG
-- Edit `.env` file and put your ACTUAL MySQL root password
-- Restart: `npm run dev`
-
-**Forgot MySQL root password?**
-- Stop MySQL: `net stop MySQL80`
-- Restart without password: `mysqld --skip-grant-tables`
-- In another terminal: `mysql -u root`
-- Run: `FLUSH PRIVILEGES; ALTER USER 'root'@'localhost' IDENTIFIED BY 'newpassword';`
+## 🆘 Troubleshooting
 
 **Port 5000 already in use?**
 ```powershell
@@ -81,10 +86,14 @@ netstat -ano | findstr :5000
 taskkill /PID <PID> /F
 ```
 
-**MySQL connection failed?**
-- Check MySQL is running
-- Verify `.env` has correct credentials
-- Try: `mysql -u root -p -e "SELECT 1;"`
+**MySQL password error: "Access denied"?**
+- Edit `.env` file
+- Put your ACTUAL MySQL root password
+- Restart: `npm run dev`
+
+**"Database error: Unknown column"?**
+- Just restart: Stop `npm run dev` and run it again
+- If still broken, reset database: `mysql -u root -p"" < database_setup_complete.sql`
 
 **Dependencies error?**
 ```powershell
@@ -92,9 +101,10 @@ rm -r node_modules
 npm install
 ```
 
-**Database error?**
+**"I messed up the database - reset it!"**
 ```powershell
-mysql -u root -p < database_setup.sql
+mysql -u root -p"" < database_setup_complete.sql
+npm run dev
 ```
 
 ---
@@ -103,3 +113,4 @@ mysql -u root -p < database_setup.sql
 
 - **README.md** - Project overview
 - **PROJECT_STRUCTURE.md** - Folder layout
+- **database_setup_complete.sql** - Database schema + sample data (one file!)
