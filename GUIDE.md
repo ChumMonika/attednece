@@ -61,10 +61,16 @@ Done! That's it! ✅
 
 ## 🆘 Troubleshooting
 
-**MySQL password error or "Plugin caching_sha2_password"?**
-- Just run the command ONCE and paste your password
-- Don't press enter multiple times
-- Or use `setup.bat` instead (no password needed!)
+**"Access denied for user 'root'@'localhost'"?**
+- Your `.env` password is WRONG
+- Edit `.env` file and put your ACTUAL MySQL root password
+- Restart: `npm run dev`
+
+**Forgot MySQL root password?**
+- Stop MySQL: `net stop MySQL80`
+- Restart without password: `mysqld --skip-grant-tables`
+- In another terminal: `mysql -u root`
+- Run: `FLUSH PRIVILEGES; ALTER USER 'root'@'localhost' IDENTIFIED BY 'newpassword';`
 
 **Port 5000 already in use?**
 ```powershell
