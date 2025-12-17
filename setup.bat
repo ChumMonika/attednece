@@ -21,16 +21,20 @@ echo.
 
 REM Check if .env file exists
 if not exist .env (
-    echo [2/5] Creating .env file from template...
-    if exist .env.example (
-        copy .env.example .env
-        echo IMPORTANT: Edit .env file with your MySQL credentials!
-        echo.
-        pause
-    ) else (
-        echo ERROR: .env.example not found!
-        exit /b 1
-    )
+    echo [2/5] Creating .env file...
+    (
+        echo DB_HOST=localhost
+        echo DB_PORT=3306
+        echo DB_USER=root
+        echo DB_PASSWORD=your_mysql_password
+        echo DB_NAME=university_staff_tracker
+        echo NODE_ENV=development
+        echo PORT=5000
+        echo SESSION_SECRET=your_session_secret
+    ) > .env
+    echo IMPORTANT: Edit .env file with your MySQL credentials!
+    echo.
+    pause
 ) else (
     echo [2/5] .env file already exists... OK
 )

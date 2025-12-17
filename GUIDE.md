@@ -1,15 +1,14 @@
 # Setup & Update Guide
 
-## 🆕 First Time Setup (New Members)
-
-### Step 1: Clone Project
+## 🆕 First Time Setup
+### Step 1: Clone Project if not yet
 ```powershell
 git clone https://github.com/ChumMonika/attednece.git
 cd attednece
 npm install
 ```
 
-### Step 2: Create `.env` File
+### Step 2: Create `.env` File if not have
 Create a file named `.env` in the project root:
 ```env
 DB_HOST=localhost
@@ -23,9 +22,17 @@ SESSION_SECRET=your_session_secret
 ```
 
 ### Step 3: Set Up Database
+
+**Option A: Using setup.bat (EASIEST - Windows)**
+```powershell
+.\setup.bat
+```
+
+**Option B: Manual setup**
 ```powershell
 mysql -u root -p < database_setup.sql
 ```
+(Just paste your password when prompted - only ONCE)
 
 ### Step 4: Run Project
 ```powershell
@@ -46,11 +53,18 @@ npm install
 npm run dev
 ```
 
+**Your `.env` file stays the same!** Don't change it. Just pull, install, and run!
+
 Done! That's it! ✅
 
 ---
 
 ## 🆘 Troubleshooting
+
+**MySQL password error or "Plugin caching_sha2_password"?**
+- Just run the command ONCE and paste your password
+- Don't press enter multiple times
+- Or use `setup.bat` instead (no password needed!)
 
 **Port 5000 already in use?**
 ```powershell
