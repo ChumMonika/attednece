@@ -4,11 +4,7 @@
 pp-Att/
 ├── 📄 Documentation (Read these!)
 │   ├── README.md                    ← Start here! Overview of the project
-│   ├── TEAM_SETUP.md               ← 3-step quick setup (new members)
-│   ├── UPDATE_GUIDE.md             ← How to update code (existing members)
-│   ├── SETUP_GUIDE.md              ← Detailed setup with troubleshooting
-│   ├── QUICK_REFERENCE.md          ← Copy-paste commands
-│   └── READY_FOR_TEAM.md           ← Comprehensive overview
+│   ├── GUIDE.md             ← How to update code (existing members)
 │
 ├── 🗄️ Configuration Files
 │   ├── .env                         ← Database credentials (don't commit!)
@@ -94,11 +90,7 @@ pp-Att/
 | File | Purpose | Audience |
 |------|---------|----------|
 | README.md | Project overview | Everyone |
-| TEAM_SETUP.md | Quick 3-step setup | New team members |
-| UPDATE_GUIDE.md | How to pull & update | Existing members |
-| SETUP_GUIDE.md | Detailed setup + troubleshooting | Everyone with issues |
-| QUICK_REFERENCE.md | Copy-paste commands | Quick lookup |
-| READY_FOR_TEAM.md | Comprehensive overview | Comprehensive understanding |
+| GUIDE.md | How to pull & update | Existing members |
 
 ### Key Source Files
 
