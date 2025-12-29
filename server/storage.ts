@@ -7,9 +7,6 @@ import {
   majors,
   classes,
   subjects,
-  semesters,
-  classModerators,
-  classSubjects,
   type User, 
   type InsertUser,
   type Attendance,
@@ -25,19 +22,31 @@ import {
   type Class,
   type InsertClass,
   type Subject,
-  type InsertSubject,
-  type Semester,
-  type InsertSemester,
-  type ClassModerator,
-  type InsertClassModerator,
-  type ClassSubject,
-  type InsertClassSubject
+  type InsertSubject
 } from "@shared/schema";
 import { drizzle } from "drizzle-orm/mysql2";
 import mysql from "mysql2";
-import { eq, and, desc, ne } from "drizzle-orm";
+import { eq, and, or, desc, ne } from "drizzle-orm";
 import fs from "fs";
 import path from "path";
+
+// Define ClassModerator types locally since we removed the table but still use the concept
+export interface ClassModerator {
+  id: number;
+  classId: number;
+  userId: number;
+  semesterId: number;
+  isPrimary: boolean;
+  createdAt: string;
+}
+
+export interface InsertClassModerator {
+  classId: number;
+  userId: number;
+  semesterId?: number;
+  isPrimary?: boolean;
+}
+
 
 export interface IStorage {
   // User management
@@ -103,14 +112,6 @@ export interface IStorage {
   createSubject(subject: InsertSubject): Promise<Subject>;
   updateSubject(id: number, updates: Partial<Subject>): Promise<Subject | undefined>;
   deleteSubject(id: number): Promise<boolean>;
-
-  // Semester management
-  getAllSemesters(): Promise<Semester[]>;
-  getSemester(id: number): Promise<Semester | undefined>;
-  getActiveSemester(): Promise<Semester | undefined>;
-  createSemester(semester: InsertSemester): Promise<Semester>;
-  updateSemester(id: number, updates: Partial<Semester>): Promise<Semester | undefined>;
-  deleteSemester(id: number): Promise<boolean>;
 
   // Class Moderator management
   getAllClassModerators(): Promise<ClassModerator[]>;
@@ -941,44 +942,6 @@ export class MemStorage implements IStorage {
     return this.subjects.delete(id);
   }
 
-  // Semester Management
-  async getAllSemesters(): Promise<Semester[]> {
-    return Array.from(this.semesters.values());
-  }
-
-  async getSemesterById(id: number): Promise<Semester | undefined> {
-    return this.semesters.get(id);
-  }
-
-  async getActiveSemester(): Promise<Semester | undefined> {
-    return Array.from(this.semesters.values()).find(semester => semester.isActive);
-  }
-
-  async createSemester(semester: InsertSemester): Promise<Semester> {
-    const id = this.currentSemesterId++;
-    const newSemester: Semester = {
-      ...semester,
-      id,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    };
-    this.semesters.set(id, newSemester);
-    return newSemester;
-  }
-
-  async updateSemester(id: number, updates: Partial<Semester>): Promise<Semester | undefined> {
-    const semester = this.semesters.get(id);
-    if (!semester) return undefined;
-
-    const updatedSemester = { ...semester, ...updates, updatedAt: new Date().toISOString() };
-    this.semesters.set(id, updatedSemester);
-    return updatedSemester;
-  }
-
-  async deleteSemester(id: number): Promise<boolean> {
-    return this.semesters.delete(id);
-  }
-
   // Class Moderator Management
   async getClassModerators(classId: number): Promise<ClassModerator[]> {
     return Array.from(this.classModerators.values()).filter(cm => cm.classId === classId);
@@ -1077,16 +1040,82 @@ export class MySQLStorage implements IStorage {
 
   // User management
   async getUser(id: number): Promise<User | undefined> {
-    const result = await this.db.select().from(users).where(eq(users.id, id)).limit(1);
-    return result[0];
+    const result = await this.db
+      .select({
+        id: users.id,
+        uniqueId: users.uniqueId,
+        name: users.name,
+        email: users.email,
+        password: users.password,
+        role: users.role,
+        departmentId: users.departmentId,
+        status: users.status,
+        createdAt: users.createdAt,
+        department: {
+          id: departments.id,
+          name: departments.name,
+          shortName: departments.shortName,
+        }
+      })
+      .from(users)
+      .leftJoin(departments, eq(users.departmentId, departments.id))
+      .where(eq(users.id, id))
+      .limit(1);
+    
+    if (!result || !result[0]) return undefined;
+
+    // Handle null department (when user has no department_id)
+    const department = result[0].department && result[0].department.id !== null
+      ? result[0].department 
+      : undefined;
+    
+    return {
+      ...result[0],
+      department
+    } as any;
   }
 
   async getUserByUniqueId(uniqueId: string): Promise<User | undefined> {
     try {
       console.log(`Searching for user with uniqueId: ${uniqueId}`);
-      const result = await this.db.select().from(users).where(eq(users.uniqueId, uniqueId)).limit(1);
-      console.log(`Found user:`, result[0] ? `${result[0].name} (${result[0].uniqueId})` : 'Not found');
-      return result[0];
+      const result = await this.db
+        .select({
+          id: users.id,
+          uniqueId: users.uniqueId,
+          name: users.name,
+          email: users.email,
+          password: users.password,
+          role: users.role,
+          departmentId: users.departmentId,
+          status: users.status,
+          createdAt: users.createdAt,
+          department: {
+            id: departments.id,
+            name: departments.name,
+            shortName: departments.shortName,
+          }
+        })
+        .from(users)
+        .leftJoin(departments, eq(users.departmentId, departments.id))
+        .where(eq(users.uniqueId, uniqueId))
+        .limit(1);
+      
+      if (!result || !result[0]) {
+        console.log(`User not found with uniqueId: ${uniqueId}`);
+        return undefined;
+      }
+      
+      console.log(`Found user: ${result[0].name} (${result[0].uniqueId})`);
+
+      // Handle null department (when user has no department_id)
+      const department = result[0].department && result[0].department.id !== null
+        ? result[0].department 
+        : undefined;
+      
+      return {
+        ...result[0],
+        department
+      } as any;
     } catch (error) {
       console.error('Error querying MySQL:', error);
       throw error;
@@ -1694,50 +1723,96 @@ export class MySQLStorage implements IStorage {
     return (result as any).affectedRows > 0;
   }
 
-  // Semester management
-  async getAllSemesters(): Promise<Semester[]> {
-    return await this.db.select().from(semesters);
-  }
-
-  async getSemesterById(id: number): Promise<Semester | undefined> {
-    const result = await this.db.select().from(semesters).where(eq(semesters.id, id)).limit(1);
-    return result[0];
-  }
-
-  async createSemester(semester: InsertSemester): Promise<Semester> {
-    await this.db.insert(semesters).values(semester);
-    const result = await this.db.select().from(semesters).orderBy(desc(semesters.id)).limit(1);
-    return result[0];
-  }
-
-  async updateSemester(id: number, updates: Partial<Semester>): Promise<Semester | undefined> {
-    await this.db.update(semesters).set(updates).where(eq(semesters.id, id));
-    return this.getSemesterById(id);
-  }
-
-  async deleteSemester(id: number): Promise<boolean> {
-    const result = await this.db.delete(semesters).where(eq(semesters.id, id));
-    return (result as any).affectedRows > 0;
-  }
-
   // Class Moderator management
   async getAllClassModerators(): Promise<ClassModerator[]> {
     return await this.db.select().from(classModerators);
   }
 
+  async getClassModeratorsByClass(classId: number): Promise<ClassModerator[]> {
+    // Query users table where classId matches and role is class_moderator or moderator
+    const moderators = await this.db
+      .select()
+      .from(users)
+      .where(
+        and(
+          eq(users.classId, classId),
+          or(eq(users.role, "class_moderator"), eq(users.role, "moderator"))
+        )
+      );
+    
+    // Transform to ClassModerator format for compatibility
+    return moderators.map(user => ({
+      id: user.id,
+      classId: user.classId!,
+      userId: user.id,
+      semesterId: 0, // Not used anymore
+      isPrimary: true, // All moderators are primary in this simplified model
+      createdAt: user.createdAt,
+    }));
+  }
+
+  async getClassModeratorsByUser(userId: number): Promise<ClassModerator[]> {
+    // Query users table for this specific user
+    const user = await this.db
+      .select()
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
+    
+    if (!user[0] || !user[0].classId) {
+      return [];
+    }
+    
+    // Return single assignment based on user's classId
+    return [{
+      id: user[0].id,
+      classId: user[0].classId,
+      userId: user[0].id,
+      semesterId: 0, // Not used anymore
+      isPrimary: true,
+      createdAt: user[0].createdAt,
+    }];
+  }
+
   async getClassModeratorById(id: number): Promise<ClassModerator | undefined> {
-    const result = await this.db.select().from(classModerators).where(eq(classModerators.id, id)).limit(1);
-    return result[0];
+    const user = await this.db.select().from(users).where(eq(users.id, id)).limit(1);
+    if (!user[0] || !user[0].classId) return undefined;
+    
+    return {
+      id: user[0].id,
+      classId: user[0].classId,
+      userId: user[0].id,
+      semesterId: 0,
+      isPrimary: true,
+      createdAt: user[0].createdAt,
+    };
   }
 
   async createClassModerator(moderator: InsertClassModerator): Promise<ClassModerator> {
-    await this.db.insert(classModerators).values(moderator);
-    const result = await this.db.select().from(classModerators).orderBy(desc(classModerators.id)).limit(1);
-    return result[0];
+    // Update user's classId instead of inserting into class_moderators table
+    await this.db
+      .update(users)
+      .set({ classId: moderator.classId })
+      .where(eq(users.id, moderator.userId));
+    
+    const user = await this.db.select().from(users).where(eq(users.id, moderator.userId)).limit(1);
+    return {
+      id: user[0].id,
+      classId: user[0].classId!,
+      userId: user[0].id,
+      semesterId: moderator.semesterId || 0,
+      isPrimary: moderator.isPrimary || true,
+      createdAt: user[0].createdAt,
+    };
   }
 
   async deleteClassModerator(id: number): Promise<boolean> {
-    const result = await this.db.delete(classModerators).where(eq(classModerators.id, id));
+    // Set user's classId to null instead of deleting from class_moderators
+    const result = await this.db
+      .update(users)
+      .set({ classId: null })
+      .where(eq(users.id, id));
+    
     return (result as any).affectedRows > 0;
   }
 }

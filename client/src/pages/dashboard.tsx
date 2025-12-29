@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getCurrentUser } from "@/lib/auth";
 import HeadDashboard from "@/components/head-dashboard";
 import AdminDashboard from "@/components/new-admin-dashboard";
-import ModeratorDashboard from "@/components/moderator-dashboard";
+import ClassModeratorDashboard from "@/components/dashboards/class-moderator-dashboard";
 import HRAssistantDashboard from "@/components/hr-assistant-dashboard";
 import TeacherDashboard from "@/components/teacher-dashboard";
 import { useEffect, useState } from "react";
@@ -57,8 +57,9 @@ export default function Dashboard() {
         return <HeadDashboard user={user} />;
       case "admin":
         return <AdminDashboard user={user} />;
+      case "class_moderator":
       case "moderator":
-        return <ModeratorDashboard user={user} />;
+        return <ClassModeratorDashboard user={user} />;
       case "hr_assistant":
         return <HRAssistantDashboard user={user} />;
       case "teacher":

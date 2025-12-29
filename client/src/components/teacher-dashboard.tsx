@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -47,6 +48,22 @@ export default function TeacherDashboard({ user }: TeacherDashboardProps) {
   const [expandedLeaveRequestId, setExpandedLeaveRequestId] = useState<number | null>(null);
   const [approverMap, setApproverMap] = useState<{ [userId: number]: { name: string } }>({});
   const [historyStatusFilter, setHistoryStatusFilter] = useState<'all' | 'approved' | 'rejected'>('all');
+
+  // Helper to get current day name
+  const getCurrentDay = () => {
+    const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    return days[new Date().getDay()];
+  };
+  const currentDay = getCurrentDay();
+
+  // Fetch teacher's schedules (enriched)
+  const { data: mySchedules } = useQuery<any[]>({
+    queryKey: ["/api/my-schedules"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", "/api/my-schedules");
+      return res.json();
+    }
+  });
 
   const monthOptions = (() => {
     const months: { value: string; label: string }[] = [];
@@ -200,24 +217,66 @@ export default function TeacherDashboard({ user }: TeacherDashboardProps) {
               </div>
             </Card>
 
-            {/* Announcements */}
+            {/* Today's Teaching Schedule (primary) */}
             <Card className="card-modern shadow-xl border-0 animate-fade-in lg:col-span-3">
               <div className="p-6 flex items-center border-b border-gray-100">
-                <Megaphone className="w-6 h-6 text-orange-500 mr-3" />
-                <h2 className="text-xl font-bold text-gray-800">Announcements</h2>
+                <Calendar className="w-6 h-6 text-indigo-500 mr-3" />
+                <h2 className="text-xl font-bold text-gray-800">Today's Teaching Schedule</h2>
+                <p className="text-sm text-gray-500 ml-4">{currentDay}</p>
               </div>
               <CardContent className="p-6">
-                <ul className="space-y-4">
-                  {announcements.map(a => (
-                    <li key={a.id} className="bg-orange-50 border-l-4 border-orange-400 rounded-xl p-4 shadow-sm">
-                      <div className="flex justify-between items-center mb-1">
-                        <span className="font-semibold text-orange-700">{a.title}</span>
-                        <span className="text-xs text-gray-400">{a.date}</span>
-                      </div>
-                      <p className="text-gray-700 text-sm">{a.message}</p>
-                    </li>
-                  ))}
-                </ul>
+                {mySchedules && mySchedules.filter((s: any) => s.day === currentDay).length === 0 && (
+                  <div className="text-center py-8 text-gray-500">
+                    <Calendar className="w-12 h-12 mx-auto mb-4 text-gray-300" />
+                    <p className="text-lg font-medium">You have no classes today</p>
+                  </div>
+                )}
+
+                {mySchedules && mySchedules.filter((s: any) => s.day === currentDay).length > 0 && (
+                  <div className="overflow-x-auto">
+                    <table className="w-full border-collapse">
+                      <thead>
+                        <tr className="bg-gray-50 border-b border-gray-200">
+                          <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Time</th>
+                          <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Subject (Code)</th>
+                          <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Class</th>
+                          <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Room</th>
+                          <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {mySchedules.filter((s: any) => s.day === currentDay).map((s: any) => (
+                          <tr key={s.id} className="border-b border-gray-100 hover:bg-gray-50">
+                            <td className="px-4 py-4 text-sm font-semibold text-gray-900"><Clock className="w-5 h-5 inline mr-2 text-indigo-500" />{s.startTime} – {s.endTime}</td>
+                            <td className="px-4 py-4 text-sm">
+                              <div className="font-medium text-gray-900">{s.subject?.name || 'Unknown Subject'}</div>
+                              <div className="text-xs text-gray-500">{s.subject?.code || ''}</div>
+                            </td>
+                            <td className="px-4 py-4 text-sm text-gray-700">{s.classLabel}</td>
+                            <td className="px-4 py-4 text-sm text-gray-600">{s.room}</td>
+                            <td className="px-4 py-4 text-sm">
+                              {attendanceHistory.find(a => a.scheduleId === s.id) ? (
+                                (() => {
+                                  const a = attendanceHistory.find(a => a.scheduleId === s.id)!;
+                                  const label = a.status.charAt(0).toUpperCase() + a.status.slice(1);
+                                  const className = a.status === 'present' ? 'bg-green-100 text-green-800' : a.status === 'leave' ? 'bg-purple-100 text-purple-800' : 'bg-gray-100 text-gray-600';
+                                  return (
+                                    <div>
+                                      <span className={`px-3 py-1 rounded-full text-sm font-semibold ${className}`}>{label}</span>
+                                      {a.markedByName && <div className="text-xs text-gray-400">Marked by {a.markedByName}</div>}
+                                    </div>
+                                  );
+                                })()
+                              ) : (
+                                <span className="px-3 py-1 rounded-full bg-gray-100 text-gray-600 text-sm">Pending</span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </CardContent>
             </Card>
           </div>
@@ -252,15 +311,23 @@ export default function TeacherDashboard({ user }: TeacherDashboardProps) {
                     {filteredAttendance.length > 0 ? (
                       filteredAttendance.map(att => (
                         <div key={att.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-xl hover:bg-gray-100 transition-colors">
-                          <span className="font-medium text-gray-900">{att.date}</span>
-                          <span className={`px-3 py-1 rounded-full text-sm font-semibold ${
-                            att.status === 'present' ? 'bg-green-100 text-green-800' :
-                            att.status === 'absent' ? 'bg-red-100 text-red-800' :
-                            att.status === 'leave' ? 'bg-yellow-100 text-yellow-800' :
-                            'bg-blue-100 text-blue-800'
-                          }`}>
-                            {att.status.charAt(0).toUpperCase() + att.status.slice(1)}
-                          </span>
+                          <div className="flex-1">
+                            <div className="font-medium text-gray-900">{att.date}</div>
+                            {att.schedule && (
+                              <div className="text-sm text-gray-600">{att.schedule.classInfo?.classLabel || att.schedule.classLabel || ''} — {att.schedule.subject?.name || ''}</div>
+                            )}
+                            {att.markedByName && <div className="text-xs text-gray-400">Marked by {att.markedByName}</div>}
+                          </div>
+                          <div>
+                            <span className={`px-3 py-1 rounded-full text-sm font-semibold ${
+                              att.status === 'present' ? 'bg-green-100 text-green-800' :
+                              att.status === 'absent' ? 'bg-red-100 text-red-800' :
+                              att.status === 'leave' ? 'bg-purple-100 text-purple-800' :
+                              'bg-gray-100 text-gray-600'
+                            }`}>
+                              {att.status.charAt(0).toUpperCase() + att.status.slice(1)}
+                            </span>
+                          </div>
                         </div>
                       ))
                     ) : (

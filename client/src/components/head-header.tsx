@@ -6,21 +6,11 @@ import { useToast } from "@/hooks/use-toast";
 import { LogOut } from "lucide-react";
 import type { User } from "@/types";
 
-interface AdminHeaderProps {
+interface HeadHeaderProps {
   user: User;
-  title?: string;
-  subtitle?: string;
-  borderColor?: string;
-  bgColor?: string;
 }
 
-export default function AdminHeader({ 
-  user, 
-  title = "University Attendance System",
-  subtitle = "Administrative Portal",
-  borderColor,
-  bgColor 
-}: AdminHeaderProps) {
+export default function HeadHeader({ user }: HeadHeaderProps) {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
 
@@ -48,20 +38,13 @@ export default function AdminHeader({
         <div className="flex items-center justify-between">
           {/* Left Side - Logo/Title */}
           <div className="flex items-center space-x-4">
-            <div className="w-12 h-12 bg-gradient-to-br from-blue-600 via-blue-500 to-cyan-500 rounded-xl flex items-center justify-center shadow-lg">
-              <span className="text-white font-bold text-xl">U</span>
+            <div className="w-12 h-12 bg-gradient-to-br from-purple-600 via-purple-500 to-pink-500 rounded-xl flex items-center justify-center shadow-lg">
+              <span className="text-white font-bold text-xl">H</span>
             </div>
             <div className="flex items-center space-x-3">
-              {subtitle && subtitle !== "Administrative Portal" && (
-                <span className="px-3 py-1.5 bg-purple-100 text-purple-800 rounded-lg font-semibold text-lg">
-                  {subtitle}
-                </span>
-              )}
               <div>
-                <h1 className="text-xl font-bold text-gray-900 leading-tight">{title}</h1>
-                {subtitle === "Administrative Portal" && (
-                  <p className="text-xs text-gray-500 mt-0.5">{subtitle}</p>
-                )}
+                <h1 className="text-xl font-bold text-gray-900 leading-tight">University Attendance System</h1>
+                <p className="text-xs text-gray-500 mt-0.5">Head Portal - Department Management</p>
               </div>
             </div>
           </div>
@@ -72,9 +55,9 @@ export default function AdminHeader({
             <div className="flex items-center space-x-3 px-4 py-2 bg-gray-50 rounded-lg border border-gray-200">
               <div className="text-right">
                 <p className="text-sm font-semibold text-gray-900">{user.name}</p>
-                <p className="text-xs text-gray-500 capitalize">{user.role.replace('_', ' ')}</p>
+                <p className="text-xs text-gray-500 capitalize">Head</p>
               </div>
-              <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center ring-2 ring-white shadow-md">
+              <div className="w-10 h-10 bg-gradient-to-br from-purple-500 to-pink-600 rounded-full flex items-center justify-center ring-2 ring-white shadow-md">
                 <span className="text-white font-semibold text-sm">
                   {user.name?.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)}
                 </span>
@@ -83,17 +66,17 @@ export default function AdminHeader({
 
             {/* Logout Button */}
             <Button
-              variant="outline"
               size="sm"
+              variant="destructive"
               onClick={() => logoutMutation.mutate()}
               disabled={logoutMutation.isPending}
-              className="border-red-200 text-red-600 hover:bg-red-50 hover:border-red-300 hover:text-red-700 transition-colors"
+              className="flex items-center space-x-2"
             >
-              <LogOut className="w-4 h-4 mr-2" />
-              Logout
+              <LogOut className="h-4 w-4" />
+              <span>{logoutMutation.isPending ? "Logging out..." : "Logout"}</span>
             </Button>
           </div>
-        </div>
+        </div>    
       </div>
     </header>
   );

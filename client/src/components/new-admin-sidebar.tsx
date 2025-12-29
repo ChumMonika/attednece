@@ -44,7 +44,7 @@ export default function NewAdminSidebar({ activeSection, onNavigate }: NewAdminS
       {/* Logo/Header */}
       <div className="p-6 border-b border-slate-800">
         <h2 className="text-xl font-bold">Admin Portal</h2>
-        <p className="text-xs text-slate-400 mt-1">Attendance Management</p>
+        <p className="text-xs text-slate-400 mt-1">System Management</p>
       </div>
 
       {/* Navigation */}

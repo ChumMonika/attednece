@@ -46,17 +46,6 @@ export const subjects = mysqlTable("subjects", {
   updatedAt: datetime("updated_at").notNull(),
 });
 
-export const semesters = mysqlTable("semesters", {
-  id: int("id").primaryKey().autoincrement(),
-  name: varchar("name", { length: 255 }).notNull(), // e.g., "Fall 2025"
-  code: varchar("code", { length: 50 }).notNull().unique(),
-  startDate: date("start_date").notNull(),
-  endDate: date("end_date").notNull(),
-  isActive: boolean("is_active").notNull().default(false),
-  createdAt: datetime("created_at").notNull(),
-  updatedAt: datetime("updated_at").notNull(),
-});
-
 export const users = mysqlTable("users", {
   id: int("id").primaryKey().autoincrement(),
   uniqueId: varchar("unique_id", { length: 20 }).notNull().unique(), // T001, S001, etc.
@@ -74,30 +63,6 @@ export const users = mysqlTable("users", {
 }, (table) => ({
   uniqueIdIdx: index("unique_id_idx").on(table.uniqueId),
   deptIdx: index("user_dept_idx").on(table.departmentId),
-}));
-
-export const classModerators = mysqlTable("class_moderators", {
-  id: int("id").primaryKey().autoincrement(),
-  classId: int("class_id").notNull().references(() => classes.id, { onDelete: "cascade" }),
-  userId: int("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
-  semesterId: int("semester_id").notNull().references(() => semesters.id, { onDelete: "cascade" }),
-  isPrimary: boolean("is_primary").notNull().default(false), // Primary or assistant moderator
-  createdAt: datetime("created_at").notNull(),
-}, (table) => ({
-  classIdx: index("mod_class_idx").on(table.classId),
-  userIdx: index("mod_user_idx").on(table.userId),
-  semesterIdx: index("mod_semester_idx").on(table.semesterId),
-}));
-
-export const classSubjects = mysqlTable("class_subjects", {
-  id: int("id").primaryKey().autoincrement(),
-  classId: int("class_id").notNull().references(() => classes.id, { onDelete: "cascade" }),
-  subjectId: int("subject_id").notNull().references(() => subjects.id, { onDelete: "cascade" }),
-  semesterId: int("semester_id").notNull().references(() => semesters.id, { onDelete: "cascade" }),
-  createdAt: datetime("created_at").notNull(),
-}, (table) => ({
-  classSubIdx: index("class_subject_idx").on(table.classId, table.subjectId),
-  semesterIdx: index("cs_semester_idx").on(table.semesterId),
 }));
 
 // Updated schedule table - semester-based with classes and subjects
@@ -191,14 +156,6 @@ export const insertSubjectSchema = createInsertSchema(subjects, {
   credits: z.number().min(1).default(3).optional(),
 }).omit({ createdAt: true, updatedAt: true });
 
-export const insertSemesterSchema = createInsertSchema(semesters, {
-  name: z.string().min(1, "Semester name is required"),
-  code: z.string().min(1, "Semester code is required"),
-  startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Start date must be in YYYY-MM-DD format"),
-  endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "End date must be in YYYY-MM-DD format"),
-  isActive: z.boolean().default(false),
-});
-
 export const markAttendanceSchema = z.object({
   userId: z.number(),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be in YYYY-MM-DD format"),
@@ -247,12 +204,6 @@ export type Class = typeof classes.$inferSelect;
 export type InsertClass = typeof classes.$inferInsert;
 export type Subject = typeof subjects.$inferSelect;
 export type InsertSubject = typeof subjects.$inferInsert;
-export type Semester = typeof semesters.$inferSelect;
-export type InsertSemester = typeof semesters.$inferInsert;
-export type ClassModerator = typeof classModerators.$inferSelect;
-export type InsertClassModerator = typeof classModerators.$inferInsert;
-export type ClassSubject = typeof classSubjects.$inferSelect;
-export type InsertClassSubject = typeof classSubjects.$inferInsert;
 export type Attendance = typeof attendance.$inferSelect;
 export type InsertAttendance = typeof attendance.$inferInsert;
 export type LeaveRequest = typeof leaveRequests.$inferSelect;
