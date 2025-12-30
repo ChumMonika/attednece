@@ -3,6 +3,7 @@ import { useMutation } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { logout } from "@/lib/auth";
 import { useToast } from "@/hooks/use-toast";
+import { Clock, CheckCircle2, XCircle, Building2 } from "lucide-react";
 import { LogOut } from "lucide-react";
 import type { User } from "@/types";
 
@@ -44,7 +45,11 @@ export default function HeadHeader({ user }: HeadHeaderProps) {
             <div className="flex items-center space-x-3">
               <div>
                 <h1 className="text-xl font-bold text-gray-900 leading-tight">University Attendance System</h1>
-                <p className="text-xs text-gray-500 mt-0.5">Head Portal - Department Management</p>
+                            <div className="flex items-center gap-2 text-sm text-purple-900">
+                              <Building2 className="h-4 w-4" />
+                              <span className="font-semibold">Department:</span>
+                              <span>{user.department?.name || "N/A"}</span>
+                            </div>
               </div>
             </div>
           </div>

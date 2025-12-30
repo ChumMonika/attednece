@@ -22,6 +22,8 @@ export interface Class {
   majorId: number;
   year: number;
   semester: number;
+  startDate?: string;
+  endDate?: string;
   academicYear: string;
   group: string; // REQUIRED: M1, M2, A5, etc.
   classLabel?: string; // Auto-generated compact format: "BDSE Y2S2 M1"
@@ -90,6 +92,7 @@ export interface Attendance {
   isLate: boolean;
   markedAt?: string;
   markedBy?: number;
+  markedByName?: string;
   scheduleId?: number;
   notes?: string;
   user?: User;

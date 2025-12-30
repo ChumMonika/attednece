@@ -51,7 +51,7 @@ export default function InformationPage() {
                         <tr key={user.id} className={idx % 2 === 0 ? 'bg-white' : 'bg-orange-50'}>
                           <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-900 font-semibold">{user.name}</td>
                           <td className="px-4 py-2 whitespace-nowrap text-sm text-pink-700 font-bold">{user.uniqueId}</td>
-                          <td className="px-4 py-2 whitespace-nowrap text-sm text-orange-600 font-bold">{user.department}</td>
+                          <td className="px-4 py-2 whitespace-nowrap text-sm text-orange-600 font-bold">{user.department?.name || "N/A"}</td>
                           <td className="px-4 py-2 whitespace-nowrap text-sm">
                             <span className={`px-2 py-1 rounded-full text-xs font-bold shadow-md 
                               ${user.role === 'head' ? 'bg-indigo-200 text-indigo-900' :

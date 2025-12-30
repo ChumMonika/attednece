@@ -29,6 +29,8 @@ export const classes = mysqlTable("classes", {
   year: int("year").notNull(), // Academic year: 1, 2, 3, 4
   semester: int("semester").notNull(), // 1 or 2
   academicYear: varchar("academic_year", { length: 20 }).notNull(), // "2025-2026"
+  startDate: date("start_date").notNull(),
+  endDate: date("end_date").notNull(),
   group: varchar("group", { length: 10 }).notNull(), // REQUIRED: M1, M2, A1, A2, etc.
   isActive: boolean("is_active").notNull().default(true), // For semester rollover
   createdAt: datetime("created_at").notNull(),
@@ -147,6 +149,8 @@ export const insertClassSchema = createInsertSchema(classes, {
   year: z.number().min(1).max(4),
   semester: z.number().min(1).max(2),
   academicYear: z.string().min(1, "Academic year is required"),
+  startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Start date must be in YYYY-MM-DD format"),
+  endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "End date must be in YYYY-MM-DD format"),
   group: z.string().min(1, "Group is required").max(10).regex(/^[A-Z0-9]+$/, "Group must be uppercase letters/numbers (e.g., M1, M2, A1)"),
 }).omit({ name: true, createdAt: true, updatedAt: true }); // name will be auto-generated
 

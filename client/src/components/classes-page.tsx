@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -31,8 +31,42 @@ export default function ClassesPage() {
     year: "",
     semester: "",
     academicYear: "",
+    startDate: "",
+    endDate: "",
     group: "",
   });
+
+  // Auto-generate academicYear from startDate when academicYear not manually set
+  useEffect(() => {
+    try {
+      const sd = formData.startDate;
+      if (!sd) return;
+      const start = new Date(sd);
+      if (isNaN(start.getTime())) return;
+      const startYear = start.getFullYear();
+      const generated = `${startYear}-${startYear + 1}`;
+
+      setFormData((prev) => {
+        // If user has no academicYear set or the existing academicYear matches
+        // the previously generated value based on the previous startDate, overwrite it.
+        let prevGenerated: string | null = null;
+        if (prev.startDate) {
+          const p = new Date(prev.startDate);
+          if (!isNaN(p.getTime())) {
+            const py = p.getFullYear();
+            prevGenerated = `${py}-${py + 1}`;
+          }
+        }
+
+        if (!prev.academicYear || prev.academicYear === prevGenerated) {
+          return { ...prev, academicYear: generated };
+        }
+        return prev;
+      });
+    } catch (e) {
+      // ignore
+    }
+  }, [formData.startDate]);
 
   const { data: classes, isLoading } = useQuery<Class[]>({
     queryKey: ["/api/classes"],
@@ -189,16 +223,32 @@ export default function ClassesPage() {
   const openDialog = (cls?: Class) => {
     if (cls) {
       setEditingClass(cls);
+      const toInputDate = (v: any) => {
+        if (!v) return "";
+        // If it's a Date object
+        if (v instanceof Date) return v.toISOString().split('T')[0];
+        // If it's a string like '2025-09-01' or '2025-09-01T00:00:00.000Z'
+        if (typeof v === 'string') {
+          const t = v.indexOf('T') >= 0 ? new Date(v) : new Date(v + 'T00:00:00');
+          if (!isNaN(t.getTime())) return t.toISOString().split('T')[0];
+          // Fallback: return original string
+          return v;
+        }
+        return String(v);
+      };
+
       setFormData({
         majorId: cls.majorId.toString(),
         year: cls.year.toString(),
         semester: cls.semester.toString(),
         academicYear: cls.academicYear || "",
+        startDate: toInputDate((cls as any).startDate),
+        endDate: toInputDate((cls as any).endDate),
         group: (cls as any).group || "",
       });
     } else {
       setEditingClass(null);
-      setFormData({ majorId: "", year: "", semester: "", academicYear: "", group: "" });
+      setFormData({ majorId: "", year: "", semester: "", academicYear: "", startDate: "", endDate: "", group: "" });
     }
     setIsDialogOpen(true);
   };
@@ -206,12 +256,12 @@ export default function ClassesPage() {
   const closeDialog = () => {
     setIsDialogOpen(false);
     setEditingClass(null);
-    setFormData({ majorId: "", year: "", semester: "", academicYear: "", group: "" });
+    setFormData({ majorId: "", year: "", semester: "", academicYear: "", startDate: "", endDate: "", group: "" });
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.majorId || !formData.year || !formData.semester || !formData.academicYear || !formData.group) {
+    if (!formData.majorId || !formData.year || !formData.semester || !formData.academicYear || !formData.group || !formData.startDate || !formData.endDate) {
       toast({
         title: "Error",
         description: "Please fill in all required fields",
@@ -219,11 +269,23 @@ export default function ClassesPage() {
       });
       return;
     }
+    // Validate date ordering
+    if (new Date(formData.endDate) < new Date(formData.startDate)) {
+      toast({
+        title: "Error",
+        description: "End date must be the same or after start date",
+        variant: "destructive",
+      });
+      return;
+    }
+
     saveMutation.mutate({
       majorId: parseInt(formData.majorId),
       year: parseInt(formData.year),
       semester: parseInt(formData.semester),
       academicYear: formData.academicYear,
+      startDate: formData.startDate,
+      endDate: formData.endDate,
       group: formData.group.toUpperCase(), // Ensure uppercase
     });
   };
@@ -535,15 +597,41 @@ export default function ClassesPage() {
               />
               <p className="text-xs text-gray-500 mt-1">Required: M1 (Morning 1), M2 (Morning 2), A1 (Afternoon 1), A2 (Afternoon 2), etc.</p>
             </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label htmlFor="startDate">Start Date <span className="text-red-500">*</span></Label>
+                <Input
+                  id="startDate"
+                  type="date"
+                  value={formData.startDate}
+                  onChange={(e) => setFormData({ ...formData, startDate: e.target.value })}
+                  required
+                />
+              </div>
+              <div>
+                <Label htmlFor="endDate">End Date <span className="text-red-500">*</span></Label>
+                <Input
+                  id="endDate"
+                  type="date"
+                  value={formData.endDate}
+                  onChange={(e) => setFormData({ ...formData, endDate: e.target.value })}
+                  required
+                />
+              </div>
+            </div>
             <div>
               <Label htmlFor="academicYear">Academic Year <span className="text-red-500">*</span></Label>
-              <Input
-                id="academicYear"
-                value={formData.academicYear}
-                onChange={(e) => setFormData({ ...formData, academicYear: e.target.value })}
-                placeholder="e.g., 2025-2026"
-                required
-              />
+              <Select value={formData.academicYear} onValueChange={(value) => setFormData({ ...formData, academicYear: value })}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select Academic Year" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="2023-2024">2023-2024</SelectItem>
+                  <SelectItem value="2024-2025">2024-2025</SelectItem>
+                  <SelectItem value="2025-2026">2025-2026</SelectItem>
+                  <SelectItem value="2026-2027">2026-2027</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
             <DialogFooter>
               <Button type="button" variant="outline" onClick={closeDialog}>

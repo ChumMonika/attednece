@@ -1,10 +1,11 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
+import { useLocation } from "wouter";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
+import { logout } from "@/lib/auth";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import { Calendar, Clock, MapPin, Check, X, BookOpen, GraduationCap } from "lucide-react";
-import ClassModeratorHeader from "@/components/class-moderator-header";
+import { Calendar, Clock, MapPin, Check, X, BookOpen, GraduationCap, User as UserIcon, LogOut } from "lucide-react";
 import type { User } from "@/types";
 
 interface ScheduleWithTeacher {
@@ -46,7 +47,26 @@ interface ClassModeratorDashboardProps {
 }
 
 export default function ClassModeratorDashboard({ user }: ClassModeratorDashboardProps) {
+  const [, setLocation] = useLocation();
   const { toast } = useToast();
+
+  const logoutMutation = useMutation({
+    mutationFn: logout,
+    onSuccess: () => {
+      toast({
+        title: "Logged out",
+        description: "You have been successfully logged out",
+      });
+      setLocation("/login");
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to log out",
+        variant: "destructive",
+      });
+    },
+  });
 
   // Get current day
   const getCurrentDay = () => {
@@ -77,7 +97,7 @@ export default function ClassModeratorDashboard({ user }: ClassModeratorDashboar
 
   // Get the moderator's class information
   const moderatorClass = allSchedules?.[0]?.class;
-  const classLabel = moderatorClass?.name || "";
+  const classLabel = moderatorClass?.name || "Class";
 
   // Get attendance data for today
   const { data: attendanceToday } = useQuery<any[]>({
@@ -153,26 +173,44 @@ export default function ClassModeratorDashboard({ user }: ClassModeratorDashboar
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <ClassModeratorHeader user={user} />
+      {/* Header */}
+      <div className="bg-white shadow-sm border-b">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex justify-between items-center py-4">
+            <div className="flex items-center space-x-4">
+              <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
+                <GraduationCap className="w-6 h-6 text-blue-600" />
+              </div>
+              <div>
+                <h1 className="text-xl font-semibold text-gray-900">Class Moderator Dashboard</h1>
+                <p className="text-sm text-gray-500">Welcome back, {user.name}</p>
+              </div>
+            </div>
+            <div className="flex items-center space-x-4">
+              <div className="text-right">
+                <p className="text-sm font-medium text-gray-900">{user.name}</p>
+                <p className="text-xs text-gray-500">Class Moderator</p>
+              </div>
+              <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
+                <UserIcon className="w-5 h-5 text-blue-600" />
+              </div>
+              <Button
+                size="sm"
+                variant="destructive"
+                onClick={() => logoutMutation.mutate()}
+                disabled={logoutMutation.isPending}
+                className="flex items-center space-x-2"
+              >
+                <LogOut className="h-4 w-4" />
+                <span>{logoutMutation.isPending ? "Logging out..." : "Logout"}</span>
+              </Button>
+            </div>
+          </div>
+        </div>
+      </div>
       
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="space-y-6">
-          {/* Page Header */}
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="flex items-center gap-3">
-                <div className="flex items-center justify-center w-12 h-12 bg-gradient-to-br from-orange-500 to-orange-600 rounded-xl shadow-lg">
-                  <GraduationCap className="h-6 w-6 text-white" />
-                </div>
-                <div>
-                  <h1 className="text-2xl font-bold text-gray-900">
-                    {classLabel}Today's Schedule & Attendance to mark
-                  </h1>
-                  <p className="text-sm text-gray-600 mt-1">{getTodayDate()}</p>
-                </div>
-              </div>
-            </div>
-          </div>
 
           {/* Summary Cards */}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
@@ -233,13 +271,18 @@ export default function ClassModeratorDashboard({ user }: ClassModeratorDashboar
             </Card>
           </div>
 
+        {/* Page Header */}
+          <div className="flex items-center justify-between">
+                <div>
+                  <h1 className="text-2xl font-bold text-gray-900">
+                    {classLabel} - Today's Schedule & Attendance to mark
+                  </h1>
+                  <p className="text-sm text-gray-600 mt-1">{getTodayDate()}</p>
+                </div>
+          </div>
           {/* Schedule & Attendance Table */}
           <Card className="border-0 shadow-md">
             <CardContent className="p-0">
-              <div className="px-6 py-4 border-b border-gray-200 bg-gray-50">
-                <h2 className="text-lg font-semibold text-gray-900">Today's Schedule</h2>
-                <p className="text-sm text-gray-600 mt-1">Mark teacher attendance for each class session</p>
-              </div>
               <div className="overflow-x-auto">
                 <table className="w-full">
                   <thead className="bg-gray-50 border-b border-gray-200">

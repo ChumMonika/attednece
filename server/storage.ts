@@ -95,6 +95,7 @@ export interface IStorage {
   // Major management
   getAllMajors(): Promise<Major[]>;
   getMajor(id: number): Promise<Major | undefined>;
+  getMajorsByDepartment(departmentId: number): Promise<Major[]>;
   createMajor(major: InsertMajor): Promise<Major>;
   updateMajor(id: number, updates: Partial<Major>): Promise<Major | undefined>;
   deleteMajor(id: number): Promise<boolean>;
@@ -102,7 +103,8 @@ export interface IStorage {
   // Class management
   getAllClasses(): Promise<Class[]>;
   getClass(id: number): Promise<Class | undefined>;
-  createClass(classData: InsertClass): Promise<Class>;
+  getClassesByMajors(majorIds: number[]): Promise<Class[]>;
+  createClass(classData: InsertClass & { name: string }): Promise<Class>;
   updateClass(id: number, updates: Partial<Class>): Promise<Class | undefined>;
   deleteClass(id: number): Promise<boolean>;
 
@@ -199,9 +201,9 @@ export class MemStorage implements IStorage {
 
     // Initialize classes
     const sampleClasses = [
-      { name: "DSE Year 1", code: "DSE-Y1", majorId: 1, year: 1, createdAt: now, updatedAt: now },
-      { name: "DSE Year 2", code: "DSE-Y2", majorId: 1, year: 2, createdAt: now, updatedAt: now },
-      { name: "DSE Year 3", code: "DSE-Y3", majorId: 1, year: 3, createdAt: now, updatedAt: now },
+      { name: "DSE Year 1", code: "DSE-Y1", majorId: 1, year: 1, startDate: "2025-09-01", endDate: "2025-12-31", academicYear: "2025-2026", createdAt: now, updatedAt: now },
+      { name: "DSE Year 2", code: "DSE-Y2", majorId: 1, year: 2, startDate: "2025-09-01", endDate: "2025-12-31", academicYear: "2025-2026", createdAt: now, updatedAt: now },
+      { name: "DSE Year 3", code: "DSE-Y3", majorId: 1, year: 3, startDate: "2025-09-01", endDate: "2025-12-31", academicYear: "2025-2026", createdAt: now, updatedAt: now },
     ];
     sampleClasses.forEach(cls => {
       const classObj: Class = { ...cls, id: this.currentClassId++ };
@@ -883,7 +885,11 @@ export class MemStorage implements IStorage {
     return Array.from(this.classes.values()).filter(cls => cls.majorId === majorId);
   }
 
-  async createClass(cls: InsertClass): Promise<Class> {
+  async getClassesByMajors(majorIds: number[]): Promise<Class[]> {
+    return Array.from(this.classes.values()).filter(cls => majorIds.includes(cls.majorId));
+  }
+
+  async createClass(cls: InsertClass & { name: string }): Promise<Class> {
     const id = this.currentClassId++;
     const newClass: Class = {
       ...cls,
@@ -1194,12 +1200,15 @@ export class MySQLStorage implements IStorage {
         userId: attendance.userId,
         date: attendance.date,
         status: attendance.status,
+        isLate: attendance.isLate,
         markedAt: attendance.markedAt,
         markedBy: attendance.markedBy,
+        scheduleId: attendance.scheduleId,
+        notes: attendance.notes,
       })
       .from(attendance)
       .innerJoin(users, eq(attendance.userId, users.id))
-      .where(eq(users.department, department));
+      .where(eq(users.departmentId, department));
     
     return result;
   }
@@ -1212,9 +1221,9 @@ export class MySQLStorage implements IStorage {
     
     // Initialize departments
     allUsers.forEach(user => {
-      if (user.department && !departmentMap.has(user.department)) {
-        departmentMap.set(user.department, {
-          department: user.department,
+      if (user.departmentId && !departmentMap.has(user.departmentId)) {
+        departmentMap.set(user.departmentId, {
+          department: user.departmentId,
           totalStaff: 0,
           present: 0,
           absent: 0,
@@ -1225,8 +1234,8 @@ export class MySQLStorage implements IStorage {
     
     // Count staff by department
     allUsers.forEach(user => {
-      if (user.department) {
-        const dept = departmentMap.get(user.department);
+      if (user.departmentId) {
+        const dept = departmentMap.get(user.departmentId);
         dept.totalStaff++;
       }
     });
@@ -1235,10 +1244,10 @@ export class MySQLStorage implements IStorage {
     const today = new Date().toISOString().split('T')[0];
     
     // Count attendance by department for today
-    allAttendance.filter(att => att.date === today).forEach(att => {
+    allAttendance.filter(att => att.date.toISOString().split('T')[0] === today).forEach(att => {
       const user = allUsers.find(u => u.id === att.userId);
-      if (user && user.department) {
-        const dept = departmentMap.get(user.department);
+      if (user && user.departmentId) {
+        const dept = departmentMap.get(user.departmentId);
         if (att.status === 'present') dept.present++;
         else if (att.status === 'absent') dept.absent++;
         else if (att.status === 'leave') dept.onLeave++;
@@ -1312,7 +1321,7 @@ export class MySQLStorage implements IStorage {
       endDate: insertRequest.endDate,
       reason: insertRequest.reason,
       userId: insertRequest.userId,
-      status: 'pending',
+      status: 'pending' as const,
       submittedAt: new Date(),
       rejectionReason: null,
       respondedAt: null,
@@ -1348,33 +1357,6 @@ export class MySQLStorage implements IStorage {
     }
   }
 
-  async getCvFile(userId: number): Promise<CvFile | undefined> {
-    const result = await this.db.select().from(cvFiles).where(eq(cvFiles.userId, userId)).limit(1);
-    return result[0];
-  }
-
-  async getCvFileById(id: number): Promise<CvFile | undefined> {
-    const result = await this.db.select().from(cvFiles).where(eq(cvFiles.id, id)).limit(1);
-    return result[0];
-  }
-
-  async createCvFile(cvFile: InsertCvFile): Promise<CvFile> {
-    const result = await this.db.insert(cvFiles).values(cvFile);
-    const newCvFile = await this.db.select().from(cvFiles).where(eq(cvFiles.id, result[0].insertId as number)).limit(1);
-    return newCvFile[0];
-  }
-
-  async updateCvFile(userId: number, cvFile: InsertCvFile): Promise<CvFile> {
-    await this.db.update(cvFiles).set(cvFile).where(eq(cvFiles.userId, userId));
-    const updatedCvFile = await this.db.select().from(cvFiles).where(eq(cvFiles.userId, userId)).limit(1);
-    return updatedCvFile[0];
-  }
-
-  async deleteCvFile(id: number): Promise<boolean> {
-    const result = await this.db.delete(cvFiles).where(eq(cvFiles.id, id));
-    return (result as any).affectedRows > 0;
-  }
-
   // Schedule management
   async getAllSchedules(): Promise<Schedule[]> {
     console.log('🔍 MySQL Query: SELECT * FROM schedules ORDER BY day DESC');
@@ -1398,8 +1380,14 @@ export class MySQLStorage implements IStorage {
   }
 
   async getSchedulesByMajor(major: string): Promise<Schedule[]> {
-    console.log(`🔍 MySQL Query: SELECT * FROM schedules WHERE major = '${major}' ORDER BY day DESC`);
-    const result = await this.db.select().from(schedules).where(eq(schedules.major, major)).orderBy(desc(schedules.day));
+    console.log(`🔍 MySQL Query: SELECT schedules.* FROM schedules JOIN classes ON schedules.classId = classes.id JOIN majors ON classes.majorId = majors.id WHERE majors.shortName = '${major}' ORDER BY schedules.day DESC`);
+    const result = await this.db
+      .select()
+      .from(schedules)
+      .innerJoin(classes, eq(schedules.classId, classes.id))
+      .innerJoin(majors, eq(classes.majorId, majors.id))
+      .where(eq(majors.shortName, major))
+      .orderBy(desc(schedules.day));
     console.log(`📊 MySQL Result: Found ${result.length} schedules for major ${major} from database`);
     return result;
   }
@@ -1640,6 +1628,11 @@ export class MySQLStorage implements IStorage {
     return result[0];
   }
 
+  // Get majors by department id (used by head role)
+  async getMajorsByDepartment(departmentId: number): Promise<Major[]> {
+    return await this.db.select().from(majors).where(eq(majors.departmentId, departmentId));
+  }
+
   async createMajor(major: InsertMajor): Promise<Major> {
     const now = new Date();
     await this.db.insert(majors).values({
@@ -1671,8 +1664,20 @@ export class MySQLStorage implements IStorage {
     return result[0];
   }
 
-  async createClass(classData: InsertClass): Promise<Class> {
+  // Get classes that belong to any of the provided major IDs
+  async getClassesByMajors(majorIds: number[]): Promise<Class[]> {
+    if (!majorIds || majorIds.length === 0) return [];
+    const conditions = majorIds.map(id => eq(classes.majorId, id));
+    return await this.db.select().from(classes).where(or(...conditions));
+  }
+
+  async createClass(classData: InsertClass & { name: string }): Promise<Class> {
     const now = new Date();
+    // Debug log to verify payload
+    console.log('[MYSQL CREATE CLASS] Payload to DB:', { ...classData, createdAt: now, updatedAt: now });
+    if (!classData.name) {
+      console.error('[MYSQL CREATE CLASS] ERROR: name is missing!', classData);
+    }
     await this.db.insert(classes).values({
       ...classData,
       createdAt: now,
@@ -1725,7 +1730,26 @@ export class MySQLStorage implements IStorage {
 
   // Class Moderator management
   async getAllClassModerators(): Promise<ClassModerator[]> {
-    return await this.db.select().from(classModerators);
+    // Query users table where role is class_moderator or moderator
+    const moderators = await this.db
+      .select()
+      .from(users)
+      .where(
+        or(
+          eq(users.role, "class_moderator"),
+          eq(users.role, "moderator")
+        )
+      );
+
+    // Transform to ClassModerator format for compatibility
+    return moderators.map(user => ({
+      id: user.id,
+      classId: user.classId!,
+      userId: user.id,
+      semesterId: 0, // Not used anymore
+      isPrimary: true, // All moderators are primary in this simplified model
+      createdAt: user.createdAt.toISOString(),
+    }));
   }
 
   async getClassModeratorsByClass(classId: number): Promise<ClassModerator[]> {
@@ -1747,7 +1771,7 @@ export class MySQLStorage implements IStorage {
       userId: user.id,
       semesterId: 0, // Not used anymore
       isPrimary: true, // All moderators are primary in this simplified model
-      createdAt: user.createdAt,
+      createdAt: user.createdAt.toISOString(),
     }));
   }
 
@@ -1770,7 +1794,7 @@ export class MySQLStorage implements IStorage {
       userId: user[0].id,
       semesterId: 0, // Not used anymore
       isPrimary: true,
-      createdAt: user[0].createdAt,
+      createdAt: user[0].createdAt.toISOString(),
     }];
   }
 
@@ -1784,7 +1808,7 @@ export class MySQLStorage implements IStorage {
       userId: user[0].id,
       semesterId: 0,
       isPrimary: true,
-      createdAt: user[0].createdAt,
+      createdAt: user[0].createdAt.toISOString(),
     };
   }
 

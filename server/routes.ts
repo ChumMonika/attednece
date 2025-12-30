@@ -22,6 +22,13 @@ import {
 // For real file uploads, install multer: npm install multer @types/multer
 
 export async function registerRoutes(app: Express): Promise<Server> {
+  // Debug: inspect storage object to ensure methods exist
+  try {
+    console.log("[Startup] storage.constructor.name:", (storage as any)?.constructor?.name);
+    console.log("[Startup] storage prototype methods:", Object.getOwnPropertyNames(Object.getPrototypeOf(storage)).slice(0,50));
+  } catch (err) {
+    console.error("[Startup] Failed to inspect storage:", err);
+  }
   // Session configuration
   app.use(session({
     secret: process.env.SESSION_SECRET || 'university-attendance-secret',
@@ -138,15 +145,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userRole = (req.session as any).userRole;
       const currentUserId = (req.session as any).userId;
       
-      console.log("🔍 [Leave Requests API] Request from:", { userId: currentUserId, role: userRole });
+      console.log("📋 [Leave Requests API] Request from:", { userId: currentUserId, role: userRole });
       
       let leaveRequests;
       if (userRole === 'admin') {
-        // Admin can see all leave requests
         leaveRequests = await storage.getLeaveRequests();
         console.log("📋 [Admin] All leave requests:", leaveRequests.length);
       } else if (userRole === 'head') {
-        // Head can only see leave requests from their department
         leaveRequests = await storage.getLeaveRequests();
         console.log("📋 [Head] Total leave requests in system:", leaveRequests.length);
         
@@ -154,7 +159,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.log("👤 [Head] Current user:", { id: currentUser?.id, name: currentUser?.name, departmentId: currentUser?.departmentId });
         
         if (currentUser?.departmentId) {
-          // Filter by department
           const allUsers = await storage.getAllUsers();
           const departmentUserIds = allUsers
             .filter(u => u.departmentId === currentUser.departmentId)
@@ -169,11 +173,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           console.log("⚠️ [Head] No departmentId found for current user");
         }
       } else {
-        // Other users can only see their own leave requests
         leaveRequests = await storage.getLeaveRequests(currentUserId);
       }
 
-      // Get user information for each leave request
       const leaveRequestsWithUsers = await Promise.all(
         leaveRequests.map(async (request) => {
           const user = await storage.getUser(request.userId);
@@ -192,21 +194,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/leave-requests/respond", requireAuth, async (req, res) => {
     try {
-      console.log("🔍 [Leave Respond] Request body:", req.body);
-      console.log("🔍 [Leave Respond] Session:", { userId: (req.session as any).userId, role: (req.session as any).userRole });
+      console.log("📝 [Leave Respond] Request body:", req.body);
+      console.log("📝 [Leave Respond] Session:", { userId: (req.session as any).userId, role: (req.session as any).userRole });
       
       const { requestId, status, rejectionReason } = respondLeaveRequestSchema.parse(req.body);
       
       const userRole = (req.session as any).userRole;
       const currentUserId = (req.session as any).userId;
       
-      // Only Head of Department (HoD) and Admin can approve/reject leave requests
       if (userRole !== 'head' && userRole !== 'admin') {
         console.log("❌ [Leave Respond] Unauthorized role:", userRole);
         return res.status(403).json({ message: "Only Head of Department can approve/reject leave requests" });
       }
 
-      // Verify the leave request exists and belongs to head's department
       const allLeaveRequests = await storage.getLeaveRequests();
       const leaveRequest = allLeaveRequests.find(r => r.id === requestId);
       
@@ -217,7 +217,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       console.log("📋 [Leave Respond] Leave request:", leaveRequest);
 
-      // For head role, verify department authorization
       if (userRole === 'head') {
         const currentUser = await storage.getUser(currentUserId);
         const requestUser = await storage.getUser(leaveRequest.userId);
@@ -251,14 +250,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       console.log("✅ [Leave Respond] Updated successfully");
 
-      // If approved, automatically update attendance records to 'leave'
       if (status === 'approved') {
         const startDate = new Date(updatedRequest.startDate);
         const endDate = new Date(updatedRequest.endDate);
         
         console.log("📅 [Leave Respond] Creating attendance records from", startDate, "to", endDate);
         
-        // Mark all days in the leave period as 'leave'
         for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
           const dateStr = d.toISOString().split('T')[0];
           await storage.markAttendance({
@@ -286,19 +283,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Attendance routes
-  // Secure endpoint for users to view only their own attendance
   app.get("/api/my-attendance", requireAuth, async (req, res) => {
     try {
       const currentUserId = (req.session as any).userId;
       const attendance = await storage.getAttendance(currentUserId);
 
-      // Enrich attendance with schedule and markedBy name when available
       const enriched = await Promise.all(attendance.map(async (att) => {
         const enrichedAtt: any = { ...att };
         if (att.scheduleId) {
           const sched = await storage.getScheduleById(att.scheduleId);
           if (sched) {
-            // Attach subject and class info
             const subject = await storage.getSubjectById(sched.subjectId).catch(() => undefined);
             const classInfo = await storage.getClassById ? await (storage as any).getClassById(sched.classId).catch(() => undefined) : undefined;
             enrichedAtt.schedule = { ...sched, subject, classInfo };
@@ -317,26 +311,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/attendance/:userId", requireAuth, async (req, res) => {
-    try {
-      const userId = parseInt(req.params.userId);
-      const currentUserId = (req.session as any).userId;
-      const userRole = (req.session as any).userRole;
-
-      // Only allow users to view their own attendance or head/admin to view any
-      if (userId !== currentUserId && !['head', 'admin'].includes(userRole)) {
-        return res.status(403).json({ message: "Forbidden" });
-      }
-
-      const attendance = await storage.getAttendance(userId);
-      res.json(attendance);
-    } catch (error) {
-      res.status(500).json({ message: "Server error" });
-    }
-  });
-
-  // General attendance endpoint for heads and admins with enriched data
-  app.get("/api/attendance", requireAuth, async (req, res) => {
+  // HEAD ATTENDANCE ENDPOINT - CORRECTED LOGIC
+  app.get("/api/head/attendance", requireAuth, async (req, res) => {
     try {
       const userRole = (req.session as any).userRole;
       const currentUserId = (req.session as any).userId;
@@ -344,114 +320,191 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!['head', 'admin'].includes(userRole)) {
         return res.status(403).json({ message: "Forbidden" });
       }
-
-      let attendance = await storage.getAllAttendance();
       
-      // Filter by department for head role
-      if (userRole === 'head') {
-        const currentUser = await storage.getUser(currentUserId);
-        if (currentUser?.departmentId) {
-          const allUsers = await storage.getAllUsers();
-          const departmentUserIds = allUsers
-            .filter(u => u.departmentId === currentUser.departmentId)
-            .map(u => u.id);
-          attendance = attendance.filter(att => departmentUserIds.includes(att.userId));
+      const currentUser = await storage.getUser(currentUserId);
+      if (userRole === 'head' && !currentUser?.departmentId) {
+        return res.status(400).json({ message: "User department not found" });
+      }
+
+      // Parse filters
+      const { startDate, endDate, role: qRole, class: qClass, status: qStatus } = req.query as any;
+      const start = startDate ? new Date(startDate) : new Date("2000-01-01");
+      const end = endDate ? new Date(endDate) : new Date("2099-12-31");
+
+      // Load all data
+      const allUsers = await storage.getAllUsers();
+      const allAttendance = await storage.getAllAttendance();
+      const allLeaveRequests = await storage.getLeaveRequests();
+      const approvedLeaves = allLeaveRequests.filter(lr => lr.status === 'approved');
+      const allClasses = await storage.getAllClasses();
+      const allMajors = await storage.getAllMajors();
+      const allSchedules = await storage.getAllSchedules();
+
+      // Build maps
+      const majorMap = new Map(allMajors.map(m => [m.id, m]));
+      const classById = new Map(allClasses.map(cls => [cls.id, cls]));
+
+      const buildClassLabel = (cls: any) => {
+        if (!cls) return null;
+        const major = majorMap.get(cls.majorId);
+        const majorShort = major?.shortName || major?.name || 'Unknown';
+        return `${majorShort} Y${cls.year}S${cls.semester}${cls.group ? ' ' + cls.group : ''}`;
+      };
+
+      // Determine department classes (via major->department)
+      const departmentMajorIds = userRole === 'admin' 
+        ? allMajors.map(m => m.id)
+        : allMajors.filter(m => m.departmentId === currentUser.departmentId).map(m => m.id);
+      const departmentClassIds = allClasses.filter(c => departmentMajorIds.includes(c.majorId)).map(c => c.id);
+
+      console.log('[HEAD ATTENDANCE] Filters:', { startDate, endDate, qRole, qClass, qStatus });
+      console.log('[HEAD ATTENDANCE] Department major IDs:', departmentMajorIds);
+      console.log('[HEAD ATTENDANCE] Department class IDs:', departmentClassIds);
+      console.log('[HEAD ATTENDANCE] Total classes in system:', allClasses.length);
+      console.log('[HEAD ATTENDANCE] Total schedules in system:', allSchedules.length);
+
+      // TEACHER ATTENDANCE - Include all teachers with attendance records in department classes
+      const teacherAttendance = allAttendance.filter(a => {
+        const u = allUsers.find(uu => uu.id === a.userId);
+        if (!u || u.role !== 'teacher') return false;
+        
+        console.log(`[HEAD ATT] Checking teacher ${u.id} (${u.name}):`, { role: u.role, date: a.date });
+        
+        // Include teacher if they have a schedule for a department class
+        const teacherSchedules = allSchedules.filter(s => s.teacherId === a.userId);
+        const hasDeptSchedule = teacherSchedules.some(s => departmentClassIds.includes(s.classId));
+        
+        console.log(`[HEAD ATT]   Has dept schedule: ${hasDeptSchedule}, Total schedules: ${teacherSchedules.length}`);
+        
+        if (hasDeptSchedule) {
+          console.log(`[HEAD ATT]   Including teacher (has dept schedule)`);
+          return true;
+        }
+        
+        console.log(`[HEAD ATT]   Excluding teacher (no dept schedule)`);
+        return false;
+      });
+
+      const teacherEntries = teacherAttendance.map(a => {
+        const user = allUsers.find(u => u.id === a.userId);
+        const teacherSchedules = allSchedules.filter(s => s.teacherId === a.userId && departmentClassIds.includes(s.classId));
+        
+        // For teacher attendance, show ANY class they teach in this department
+        // (not limited to specific day of week, since we want to show which class the attendance applies to)
+        const classSchedule = teacherSchedules.length > 0 ? teacherSchedules[0] : null;
+        const classLabel = classSchedule ? buildClassLabel(classById.get(classSchedule.classId)) : null;
+
+        return {
+          id: a.id,
+          userId: a.userId,
+          date: a.date,
+          status: a.status,
+          markedBy: a.markedBy,
+          markedAt: a.markedAt,
+          user,
+          classId: classSchedule?.classId || null,
+          classLabel,
+          schedule: classSchedule,
+          scheduleId: classSchedule?.id || null
+        };
+      });
+
+      // STAFF ATTENDANCE - Filter by departmentId
+      const departmentStaff = userRole === 'admin'
+        ? allUsers.filter(u => u.role === 'staff')
+        : allUsers.filter(u => u.role === 'staff' && u.departmentId === currentUser.departmentId);
+
+      const staffAttendance = allAttendance.filter(a => {
+        const u = allUsers.find(uu => uu.id === a.userId);
+        if (!u || u.role !== 'staff') return false;
+        if (!departmentStaff.some(ds => ds.id === u.id)) return false;
+        // Only filter by date range if user provided dates
+        if (startDate && endDate) {
+          return new Date(a.date) >= start && new Date(a.date) <= end;
+        }
+        return true; // Include all staff attendance if no date filter
+      });
+
+      // Staff approved leaves
+      const staffLeaves = approvedLeaves.filter(l => {
+        const u = allUsers.find(uu => uu.id === l.userId);
+        if (!u || u.role !== 'staff') return false;
+        if (!departmentStaff.some(ds => ds.id === u.id)) return false;
+        // Only filter by date range if user provided dates
+        if (startDate && endDate) {
+          return new Date(l.startDate) <= end && new Date(l.endDate) >= start;
+        }
+        return true; // Include all leaves if no date filter
+      });
+
+      console.log('[HEAD ATTENDANCE] Teacher attendance records:', teacherEntries.length);
+      console.log('[HEAD ATTENDANCE] Staff attendance records:', staffAttendance.length);
+      console.log('[HEAD ATTENDANCE] Department staff:', departmentStaff.length);
+      console.log('[HEAD ATTENDANCE] Staff leaves:', staffLeaves.length);
+
+      // Combine all attendance
+      const attendance: any[] = [];
+      attendance.push(...teacherEntries);
+      attendance.push(...staffAttendance.map(a => {
+        const user = allUsers.find(u => u.id === a.userId);
+        return {
+          ...a,
+          user,
+          classId: null,
+          classLabel: null
+        };
+      }));
+
+      // Add staff leaves without attendance
+      for (const leave of staffLeaves) {
+        const dateStr = leave.startDate;
+        // Only filter by date range if user provided dates
+        if (startDate && endDate && (new Date(dateStr) < start || new Date(dateStr) > end)) continue;
+        const hasExisting = attendance.find(a => a.userId === leave.userId && a.date === dateStr);
+        if (!hasExisting) {
+          const user = allUsers.find(u => u.id === leave.userId);
+          attendance.push({
+            id: `leave-${leave.id}`,
+            userId: leave.userId,
+            date: dateStr,
+            status: 'leave',
+            markedBy: leave.respondedBy,
+            markedAt: leave.respondedAt || leave.submittedAt,
+            user,
+            classId: null,
+            classLabel: null
+          });
         }
       }
-      
-      // Enrich with user and schedule information
-      const enrichedAttendance = await Promise.all(
-        attendance.map(async (record) => {
-          const user = await storage.getUser(record.userId);
-          const enrichedRecord: any = { ...record, user };
-          
-          // Add schedule details if available
-          if (record.scheduleId) {
-            const schedule = await storage.getScheduleById(record.scheduleId).catch(() => null);
-            if (schedule) {
-              const classInfo = await (storage as any).getClassById(schedule.classId).catch(() => null);
-              enrichedRecord.schedule = {
-                ...schedule,
-                class: classInfo
-              };
-            }
+
+      // Apply filters
+      const filtered = attendance.filter(rec => {
+        // Only filter by date range if user provided dates
+        if (startDate && endDate) {
+          const recDate = new Date(rec.date);
+          if (recDate < start || recDate > end) return false;
+        }
+        if (qRole && qRole !== 'all' && rec.user?.role !== qRole) return false;
+        if (qStatus && qStatus !== 'all' && rec.status !== qStatus) return false;
+        if (qClass && qClass !== 'all') {
+          if (typeof qClass === 'string' && qClass.match(/^\d+$/)) {
+            if (rec.classId !== parseInt(qClass)) return false;
+          } else {
+            if (rec.classLabel !== qClass) return false;
           }
-          
-          return enrichedRecord;
-        })
-      );
-
-      res.json(enrichedAttendance);
-    } catch (error) {
-      console.error("Attendance endpoint error:", error);
-      res.status(500).json({ message: "Server error" });
-    }
-  });
-
-  app.get("/api/attendance-all", requireAuth, async (req, res) => {
-    try {
-      const userRole = (req.session as any).userRole;
-      const currentUserId = (req.session as any).userId;
-      if (!['head', 'admin'].includes(userRole)) {
-        return res.status(403).json({ message: "Forbidden" });
-      }
-
-      let attendance = await storage.getAllAttendance();
-      
-      // Filter by department for head role
-      if (userRole === 'head') {
-        const currentUser = await storage.getUser(currentUserId);
-        if (currentUser?.departmentId) {
-          const allUsers = await storage.getAllUsers();
-          const departmentUserIds = allUsers
-            .filter(u => u.departmentId === currentUser.departmentId)
-            .map(u => u.id);
-          attendance = attendance.filter(att => departmentUserIds.includes(att.userId));
         }
-      }
-      
-      // Get user information for each attendance record
-      const attendanceWithUsers = await Promise.all(
-        attendance.map(async (record) => {
-          const user = await storage.getUser(record.userId);
-          return { ...record, user };
-        })
-      );
+        return true;
+      });
 
-      res.json(attendanceWithUsers);
+      console.log('[HEAD ATTENDANCE] Total attendance before filter:', attendance.length);
+      console.log('[HEAD ATTENDANCE] Total attendance after filter:', filtered.length);
+      console.log('[HEAD ATTENDANCE] Sample filtered records (first 3):', filtered.slice(0, 3).map(r => ({ id: r.id, userId: r.userId, date: r.date, status: r.status, classLabel: r.classLabel })));
+
+      filtered.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime() || (a.user?.name || '').localeCompare(b.user?.name || ''));
+
+      res.json(filtered);
     } catch (error) {
-      res.status(500).json({ message: "Server error" });
-    }
-  });
-
-  app.get("/api/attendance-by-department", requireAuth, async (req, res) => {
-    try {
-      const userRole = (req.session as any).userRole;
-      if (!['head', 'admin'].includes(userRole)) {
-        return res.status(403).json({ message: "Forbidden" });
-      }
-
-      const { department } = req.query;
-      if (!department || department === 'all') {
-        const attendance = await storage.getAllAttendance();
-        const attendanceWithUsers = await Promise.all(
-          attendance.map(async (record) => {
-            const user = await storage.getUser(record.userId);
-            return { ...record, user };
-          })
-        );
-        res.json(attendanceWithUsers);
-      } else {
-        const attendance = await storage.getAttendanceByDepartment(department as string);
-        const attendanceWithUsers = await Promise.all(
-          attendance.map(async (record) => {
-            const user = await storage.getUser(record.userId);
-            return { ...record, user };
-          })
-        );
-        res.json(attendanceWithUsers);
-      }
-    } catch (error) {
+      console.error("Head attendance endpoint error:", error);
       res.status(500).json({ message: "Server error" });
     }
   });
@@ -477,22 +530,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userRole = (req.session as any).userRole;
       const currentUserId = (req.session as any).userId;
 
-      // ONLY Class Moderator and HR Assistant/Backup can mark attendance (per BRD)
       if (!["class_moderator", "moderator", "hr_assistant", "hr_backup"].includes(userRole)) {
         return res.status(403).json({ 
           message: "Only Class Moderators or HR can mark attendance" 
         });
       }
 
-      // Validate target user exists
       const targetUser = await storage.getUser(userId);
       if (!targetUser) {
         return res.status(404).json({ message: "User not found" });
       }
 
-      // Enforce role-specific permissions per BRD:
-      // - Class Moderator can only mark teachers
-      // - HR Assistant/Backup can only mark staff
       const canMark = 
         (["class_moderator", "moderator"].includes(userRole) && targetUser.role === "teacher") ||
         (["hr_assistant", "hr_backup"].includes(userRole) && targetUser.role === "staff");
@@ -505,11 +553,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      // Auto-detect late status based on schedule
       let isLate = false;
       if (targetUser.schedule && status === "present") {
-        const scheduleStart = targetUser.schedule.split('-')[0]; // e.g., "08:00" from "08:00-17:00"
-        const currentTime = new Date().toTimeString().split(' ')[0].substring(0, 5); // "HH:MM"
+        const scheduleStart = targetUser.schedule.split('-')[0];
+        const currentTime = new Date().toTimeString().split(' ')[0].substring(0, 5);
         isLate = currentTime > scheduleStart;
       }
 
@@ -533,7 +580,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Today schedule endpoint combining users with today's attendance (and approved leave)
   app.get("/api/attendance-today", requireAuth, async (req, res) => {
     try {
       const today = new Date().toISOString().split('T')[0];
@@ -544,13 +590,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         storage.getLeaveRequests(),
       ]);
 
-      // Build a map of attendance by userId for quick lookup
       const attendanceByUser = new Map<number, any>();
       for (const att of todaysAttendance) {
         attendanceByUser.set(att.userId, att);
       }
 
-      // Find approved leaves that cover today
       const approvedLeaveTodayByUser = new Set<number>();
       for (const req of allLeaveRequests) {
         if (req.status === 'approved') {
@@ -563,12 +607,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const result = allUsers.map(u => {
-        // Exclude password field before sending to client
         const { password, ...userWithoutPassword } = u as any;
 
         let att = attendanceByUser.get(u.id) || null;
 
-        // If no attendance but approved leave, synthesize a leave record
         if (!att && approvedLeaveTodayByUser.has(u.id)) {
           att = {
             id: -1,
@@ -592,21 +634,76 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // User management routes (admin only)
+  app.get("/api/staff-attendance", requireAuth, async (req, res) => {
+    try {
+      const userRole = (req.session as any).userRole;
+      
+      if (!['hr_assistant', 'hr_backup'].includes(userRole)) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+
+      const today = new Date().toISOString().split('T')[0];
+
+      const allUsers = await storage.getAllUsers();
+      const staffUsers = allUsers.filter(u => u.role === 'staff');
+
+      const todaysAttendance = await storage.getAttendanceByDate(today);
+      const staffAttendanceMap = new Map<number, any>();
+      
+      for (const att of todaysAttendance) {
+        const user = staffUsers.find(u => u.id === att.userId);
+        if (user) {
+          staffAttendanceMap.set(att.userId, att);
+        }
+      }
+
+      const result = await Promise.all(staffUsers.map(async (staff) => {
+        const attendance = staffAttendanceMap.get(staff.id);
+        
+        let status = 'pending';
+        let markedAt = null;
+        let markedByName = null;
+        
+        if (attendance) {
+          status = attendance.status;
+          markedAt = attendance.markedAt;
+          
+          if (attendance.markedBy) {
+            const marker = await storage.getUser(attendance.markedBy).catch(() => null);
+            markedByName = marker ? marker.name : null;
+          }
+        }
+
+        return {
+          id: staff.id,
+          name: staff.name,
+          uniqueId: staff.uniqueId,
+          status,
+          markedAt,
+          markedByName
+        };
+      }));
+
+      res.json(result);
+    } catch (error) {
+      console.error("Staff attendance endpoint error:", error);
+      res.status(500).json({ message: "Server error" });
+    }
+  });
+
+  // User management routes
   app.get("/api/users", requireAuth, async (req, res) => {
     try {
       const userRole = (req.session as any).userRole;
       const currentUserId = (req.session as any).userId;
       
-      console.log("🔍 [Users API] Request from:", { userId: currentUserId, role: userRole });
+      console.log("📋 [Users API] Request from:", { userId: currentUserId, role: userRole });
       
       let users;
       if (userRole === 'admin') {
-        // Admin can see all users
         users = await storage.getAllUsers();
         console.log("📋 [Admin] All users:", users.length);
       } else if (userRole === 'head') {
-        // Head can only see users from their department
         const currentUser = await storage.getUser(currentUserId);
         console.log("👤 [Head] Current user:", { id: currentUser?.id, name: currentUser?.name, departmentId: currentUser?.departmentId });
         
@@ -639,7 +736,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       const userData = insertUserSchema.parse(req.body);
       
-      // Hash password before storing
       const hashedPassword = await bcrypt.hash(userData.password, 10);
       const userDataWithHashedPassword = {
         ...userData,
@@ -663,7 +759,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userId = parseInt(req.params.id);
       let updates = req.body;
       
-      // If password is being updated, hash it
       if (updates.password) {
         const hashedPassword = await bcrypt.hash(updates.password, 10);
         updates = {
@@ -694,7 +789,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!user) {
         return res.status(404).json({ message: "User not found" });
       }
-      // Remove password before sending
       const { password, ...userWithoutPassword } = user;
       res.json(userWithoutPassword);
     } catch (error) {
@@ -721,7 +815,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Password reset endpoint (admin only)
   app.post("/api/users/:id/reset-password", requireAuth, async (req, res) => {
     try {
       if ((req.session as any).userRole !== 'admin') {
@@ -749,7 +842,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Stats endpoint for dashboard
   app.get("/api/stats", requireAuth, async (req, res) => {
     try {
       if (!['head', 'admin'].includes((req.session as any).userRole)) {
@@ -777,7 +869,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Test endpoint
   app.post("/api/test", (req, res) => {
     console.log("=== TEST ENDPOINT DEBUG ===");
     console.log("Test endpoint hit at:", new Date().toISOString());
@@ -786,7 +877,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.json({ message: "Test endpoint working", body: req.body });
   });
 
-  // Schedule management routes (admin, head, class_moderator, moderator)
+  // Schedule management routes
   app.get("/api/schedules", requireAuth, async (req, res) => {
     try {
       console.log("=== SCHEDULE GET DEBUG ===");
@@ -805,7 +896,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { day, major } = req.query;
       let schedules;
 
-      // For class_moderator or moderator role, get only assigned classes
       if (userRole === 'class_moderator' || userRole === 'moderator') {
         const assignedClasses = await storage.getClassModeratorsByUser(userId);
         const classIds = assignedClasses.map(cm => cm.classId);
@@ -813,19 +903,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.log("Moderator assigned class IDs:", classIds);
         
         if (classIds.length === 0) {
-          return res.json([]); // No assigned classes
+          return res.json([]);
         }
         
-        // Get all schedules and filter by assigned classes
         const allSchedules = await storage.getAllSchedules();
         schedules = allSchedules.filter(schedule => classIds.includes(schedule.classId));
         
-        // Further filter by day if provided
         if (day) {
           schedules = schedules.filter(schedule => schedule.dayOfWeek === day);
         }
       } else {
-        // Admin/Head can see all schedules
         if (day) {
           schedules = await storage.getSchedulesByDay(day as string);
         } else if (major) {
@@ -837,7 +924,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       console.log("Found schedules:", schedules.length);
 
-      // Get classes, majors, subjects, and teachers for enriched response
       const classes = await storage.getAllClasses();
       const majors = await storage.getAllMajors();
       const subjects = await storage.getAllSubjects();
@@ -845,7 +931,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const majorMap = new Map(majors.map(m => [m.id, m]));
       const subjectMap = new Map(subjects.map(s => [s.id, s]));
 
-      // Get teacher information, subject, and add class fullClassName for each schedule
       const schedulesWithTeachers = await Promise.all(
         schedules.map(async (schedule) => {
           const teacher = await storage.getUser(schedule.teacherId);
@@ -853,7 +938,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const subject = subjectMap.get(schedule.subjectId);
           
           let classLabel = 'Unknown Class';
-          let fullClassName = 'Unknown Class'; // Alias
+          let fullClassName = 'Unknown Class';
           let displayClassName = 'Unknown Class';
           let majorShort = 'Unknown';
           
@@ -863,11 +948,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
             const majorFull = major?.name || 'Unknown';
             const groupStr = (classInfo as any).group ? ` ${(classInfo as any).group}` : '';
             
-            // Compact format (classLabel - primary format)
             classLabel = `${majorShort} Y${classInfo.year}S${classInfo.semester}${groupStr}`;
-            fullClassName = classLabel; // Alias for backward compatibility
+            fullClassName = classLabel;
             
-            // Readable format for dropdowns
             const yearText = `Year ${classInfo.year}`;
             const semesterText = `Semester ${classInfo.semester}`;
             const groupText = (classInfo as any).group || '';
@@ -877,11 +960,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           return { 
             ...schedule, 
             teacher,
-            subject,          // Add subject data
-            classLabel,       // New: BDSE Y2S2 M1
-            fullClassName,    // Alias
+            subject,
+            classLabel,
+            fullClassName,
             displayClassName,
-            majorShort,       // For hierarchical filtering
+            majorShort,
             classInfo
           };
         })
@@ -918,7 +1001,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       console.log("Created schedule:", schedule);
 
-      // Get teacher information
       const teacher = await storage.getUser(schedule.teacherId);
       const scheduleWithTeacher = { ...schedule, teacher };
 
@@ -937,7 +1019,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Bulk create schedules with conflict validation
   app.post("/api/schedules/bulk", requireAuth, async (req, res) => {
     try {
       console.log("=== BULK SCHEDULE CREATE DEBUG ===");
@@ -956,7 +1037,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const createdSchedules = await storage.createBulkSchedules(bulkData.schedules);
       console.log(`Successfully created ${createdSchedules.length} schedules`);
 
-      // Get teacher information for all schedules
       const teacherIds = [...new Set(createdSchedules.map(s => s.teacherId))];
       const teachers = await Promise.all(teacherIds.map(id => storage.getUser(id)));
       const teacherMap = new Map(teachers.map(t => t ? [t.id, t] : [0, null]));
@@ -991,7 +1071,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const updates = updateScheduleSchema.parse(req.body);
       
       const now = new Date();
-      const timestamp = now.toISOString().slice(0, 19).replace('T', ' '); // Format: "2025-08-12 14:44:26"
+      const timestamp = now.toISOString().slice(0, 19).replace('T', ' ');
       
       const updatedSchedule = await storage.updateSchedule(scheduleId, {
         ...updates,
@@ -1002,7 +1082,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Schedule not found" });
       }
 
-      // Get teacher information
       const teacher = await storage.getUser(updatedSchedule.teacherId);
       const scheduleWithTeacher = { ...updatedSchedule, teacher };
 
@@ -1045,7 +1124,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Schedule not found" });
       }
 
-      // Get teacher information
       const teacher = await storage.getUser(schedule.teacherId);
       const scheduleWithTeacher = { ...schedule, teacher };
 
@@ -1055,7 +1133,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Get schedules by teacher (for mazer to see teacher schedules)
   app.get("/api/schedules/teacher/:teacherId", requireAuth, async (req, res) => {
     try {
       const userRole = (req.session as any).userRole;
@@ -1066,7 +1143,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const teacherId = parseInt(req.params.teacherId);
       const schedules = await storage.getSchedulesByTeacher(teacherId);
 
-      // Get teacher information
       const teacher = await storage.getUser(teacherId);
       const schedulesWithTeacher = schedules.map(schedule => ({ ...schedule, teacher }));
 
@@ -1076,22 +1152,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Get schedules for the currently logged-in teacher (secure, teacher-only)
   app.get("/api/my-schedules", requireAuth, async (req, res) => {
     try {
       const session = req.session as any;
       const userId = session.userId;
       const userRole = session.userRole;
 
-      // Allow access for teachers and above
       if (!['teacher', 'head', 'admin', 'mazer'].includes(userRole)) {
         return res.status(403).json({ message: "Forbidden" });
       }
 
-      // Get schedules assigned to this teacher
       const schedules = await storage.getSchedulesByTeacher(userId);
 
-      // Enrich schedules with class, subject, teacher info (reuse existing maps)
       const classes = await storage.getAllClasses();
       const majors = await storage.getAllMajors();
       const subjects = await storage.getAllSubjects();
@@ -1102,7 +1174,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const schedulesWithDetails = schedules.map(schedule => {
         const classInfo = classMap.get(schedule.classId);
         const subject = subjectMap.get(schedule.subjectId);
-        const teacher = { id: schedule.teacherId } as any; // minimal
+        const teacher = { id: schedule.teacherId } as any;
 
         let classLabel = 'Unknown Class';
         if (classInfo) {
@@ -1128,30 +1200,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // ============ DASHBOARD METRICS ENDPOINTS ============
-  
-  // Get dashboard metrics - role-based data for dashboard cards
+  // Dashboard metrics endpoints
   app.get("/api/dashboard/metrics", requireAuth, async (req, res) => {
     try {
       const session = req.session as any;
       const userId = session.userId;
       const userRole = session.userRole;
       
-      console.log("🔍 [Dashboard Metrics] Request from:", { userId, role: userRole });
+      console.log("📊 [Dashboard Metrics] Request from:", { userId, role: userRole });
       
-      // Fetch all data
       const allUsers = await storage.getAllUsers();
       const allAttendance = await storage.getAllAttendance();
       const allLeaves = await storage.getLeaveRequests();
       
       console.log("📊 [Dashboard Metrics] Total data:", { users: allUsers.length, attendance: allAttendance.length, leaves: allLeaves.length });
       
-      // Filter data based on role
       let filteredAttendance = allAttendance;
       let filteredLeaves = allLeaves;
       let filteredUsers = allUsers;
       
-      // Teachers and staff see only their own data
       if (userRole === 'teacher' || userRole === 'staff') {
         filteredAttendance = allAttendance.filter(a => a.userId === userId);
         filteredLeaves = allLeaves.filter(l => l.userId === userId);
@@ -1159,7 +1226,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.log("👤 [Teacher/Staff] Personal data only");
       }
       
-      // Head sees only their department's data
       if (userRole === 'head') {
         const currentUser = allUsers.find(u => u.id === userId);
         console.log("👤 [Head] Current user:", { id: currentUser?.id, name: currentUser?.name, departmentId: currentUser?.departmentId });
@@ -1182,7 +1248,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
       
-      // Calculate metrics
       const totalUsers = filteredUsers.length;
       const activeUsers = filteredUsers.filter(u => u.status === 'active').length;
       const inactiveUsers = filteredUsers.filter(u => u.status === 'inactive').length;
@@ -1200,7 +1265,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const approvedLeaves = filteredLeaves.filter(l => l.status === 'approved').length;
       const rejectedLeaves = filteredLeaves.filter(l => l.status === 'rejected').length;
       
-      // Today's attendance
       const today = new Date().toISOString().split('T')[0];
       const todayAttendance = filteredAttendance.filter(a => {
         const attDate = new Date(a.date).toISOString().split('T')[0];
@@ -1210,7 +1274,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const todayAbsent = todayAttendance.filter(a => a.status === 'absent').length;
       const todayLeave = todayAttendance.filter(a => a.status === 'leave').length;
       
-      // This month's attendance
       const now = new Date();
       const currentMonth = now.getMonth();
       const currentYear = now.getFullYear();
@@ -1222,7 +1285,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const monthAbsent = monthAttendance.filter(a => a.status === 'absent').length;
       const monthLeave = monthAttendance.filter(a => a.status === 'leave').length;
       
-      // Role distribution (admin/head only)
       let roleDistribution = null;
       if (userRole === 'admin' || userRole === 'head') {
         roleDistribution = {
@@ -1274,12 +1336,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
   
-  // PowerBI Integration - Get all attendance records (admin/head only)
+  // PowerBI Integration endpoints
   app.get("/api/powerbi/attendance", requireAuth, async (req, res) => {
     try {
       const session = req.session as any;
       
-      // Only admin/head can access PowerBI data
       if (session.userRole !== 'admin' && session.userRole !== 'head') {
         return res.status(403).json({ message: "Forbidden" });
       }
@@ -1287,10 +1348,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const allAttendance = await storage.getAllAttendance();
       const allUsers = await storage.getAllUsers();
       
-      // Create a map for quick user lookup
       const userMap = new Map(allUsers.map(u => [u.id, u]));
       
-      // Enrich attendance data with user details
       const enrichedData = allAttendance.map(att => {
         const user = userMap.get(att.userId);
         const markedByUser = att.markedBy ? userMap.get(att.markedBy) : null;
@@ -1320,12 +1379,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
   
-  // PowerBI Integration - Get all leave requests (admin/head only)
   app.get("/api/powerbi/leaves", requireAuth, async (req, res) => {
     try {
       const session = req.session as any;
       
-      // Only admin/head can access PowerBI data
       if (session.userRole !== 'admin' && session.userRole !== 'head') {
         return res.status(403).json({ message: "Forbidden" });
       }
@@ -1333,15 +1390,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const allLeaves = await storage.getLeaveRequests();
       const allUsers = await storage.getAllUsers();
       
-      // Create a map for quick user lookup
       const userMap = new Map(allUsers.map(u => [u.id, u]));
       
-      // Enrich leave data with user details
       const enrichedData = allLeaves.map(leave => {
         const user = userMap.get(leave.userId);
         const respondedByUser = leave.respondedBy ? userMap.get(leave.respondedBy) : null;
         
-        // Calculate duration
         const start = new Date(leave.startDate);
         const end = new Date(leave.endDate);
         const duration = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
@@ -1376,19 +1430,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
   
-  // PowerBI Integration - Get all users (admin/head only)
   app.get("/api/powerbi/users", requireAuth, async (req, res) => {
     try {
       const session = req.session as any;
       
-      // Only admin/head can access PowerBI data
       if (session.userRole !== 'admin' && session.userRole !== 'head') {
         return res.status(403).json({ message: "Forbidden" });
       }
       
       const allUsers = await storage.getAllUsers();
       
-      // Remove sensitive data (password)
       const sanitizedUsers = allUsers.map(user => ({
         id: user.id,
         uniqueId: user.uniqueId,
@@ -1754,31 +1805,51 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Class Management
   app.get("/api/classes", requireAuth, async (req, res) => {
     try {
-      if ((req.session as any).userRole !== 'admin') {
-        return res.status(403).json({ message: "Admin access required" });
+      const userRole = (req.session as any).userRole;
+      const userId = (req.session as any).userId;
+
+      let classes;
+
+      if (userRole === 'admin') {
+        // Admin can see all classes
+        classes = await storage.getAllClasses();
+      } else if (userRole === 'head') {
+        // Head can see classes from their department
+        const currentUser = await storage.getUser(userId);
+        if (!currentUser?.departmentId) {
+          return res.status(400).json({ message: "User department not found" });
+        }
+
+        // Get all majors in the head's department
+        const departmentMajors = await storage.getMajorsByDepartment(currentUser.departmentId);
+        const majorIds = departmentMajors.map(m => m.id);
+
+        // Get classes for those majors
+        classes = await storage.getClassesByMajors(majorIds);
+      } else {
+        return res.status(403).json({ message: "Access denied" });
       }
-      const classes = await storage.getAllClasses();
-      
+
       // Get all majors to build fullClassName
       const majors = await storage.getAllMajors();
       const majorMap = new Map(majors.map(m => [m.id, m]));
-      
+
       // Add fullClassName to each class
       const classesWithFullName = classes.map(cls => {
         const major = majorMap.get(cls.majorId);
         const majorShort = major?.shortName || major?.name || 'Unknown';
         const majorFull = major?.name || 'Unknown';
         const groupStr = (cls as any).group ? ` ${(cls as any).group}` : '';
-        
+
         // Compact format for database and internal use (classLabel)
         const classLabel = `${majorShort} Y${cls.year}S${cls.semester}${groupStr}`;
-        
+
         // Readable format for dropdowns and UI display
         const yearText = `Year ${cls.year}`;
         const semesterText = `Semester ${cls.semester}`;
         const groupText = (cls as any).group || '';
         const displayClassName = `${majorFull} - ${yearText} - ${semesterText}${groupText ? ' - Group ' + groupText : ''}`;
-        
+
         return {
           ...cls,
           classLabel,          // New: BDSE Y2S2 M1
@@ -1787,7 +1858,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           majorShort          // For quick access in filtering
         };
       });
-      
+
       res.json(classesWithFullName);
     } catch (error) {
       res.status(500).json({ message: "Server error" });
@@ -1808,6 +1879,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       const generatedName = `${major.shortName} Y${classData.year}S${classData.semester} ${classData.group.toUpperCase()}`;
       
+      console.log('[CREATE CLASS] Generated name:', generatedName);
+      console.log('[CREATE CLASS] Class data before create:', { ...classData, name: generatedName });
+      
       const classObj = await storage.createClass({
         ...classData,
         name: generatedName,
@@ -1815,7 +1889,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
       res.json(classObj);
     } catch (error) {
-      res.status(400).json({ message: "Invalid request data", error: (error as Error).message });
+      console.error('Create class error:', error);
+      res.status(400).json({ message: "Failed to create class", error: (error as Error).message });
     }
   });
 

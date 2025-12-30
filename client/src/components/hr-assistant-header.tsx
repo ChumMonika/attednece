@@ -6,11 +6,11 @@ import { useToast } from "@/hooks/use-toast";
 import { LogOut } from "lucide-react";
 import type { User } from "@/types";
 
-interface ClassModeratorHeaderProps {
+interface HRAssistantHeaderProps {
   user: User;
 }
 
-export default function ClassModeratorHeader({ user }: ClassModeratorHeaderProps) {
+export default function HRAssistantHeader({ user }: HRAssistantHeaderProps) {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
 
@@ -39,12 +39,12 @@ export default function ClassModeratorHeader({ user }: ClassModeratorHeaderProps
           {/* Left Side - Logo/Title */}
           <div className="flex items-center space-x-4">
             <div className="w-12 h-12 bg-gradient-to-br from-blue-600 via-blue-500 to-cyan-500 rounded-xl flex items-center justify-center shadow-lg">
-              <span className="text-white font-bold text-xl">CM</span>
+              <span className="text-white font-bold text-xl">HR</span>
             </div>
             <div className="flex items-center space-x-3">
               <div>
                 <h1 className="text-xl font-bold text-gray-900 leading-tight">University Attendance System</h1>
-                <p className="text-xs text-gray-500 mt-0.5">Class Moderator Portal - Class Management</p>
+                <p className="text-xs text-gray-500 mt-0.5">HR Assistant Portal - Staff Management</p>
               </div>
             </div>
           </div>
@@ -55,7 +55,7 @@ export default function ClassModeratorHeader({ user }: ClassModeratorHeaderProps
             <div className="flex items-center space-x-3 px-4 py-2 bg-gray-50 rounded-lg border border-gray-200">
               <div className="text-right">
                 <p className="text-sm font-semibold text-gray-900">{user.name}</p>
-                <p className="text-xs text-gray-500 capitalize">Class Moderator</p>
+                <p className="text-xs text-gray-500 capitalize">HR Assistant</p>
               </div>
               <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-cyan-600 rounded-full flex items-center justify-center ring-2 ring-white shadow-md">
                 <span className="text-white font-semibold text-sm">
