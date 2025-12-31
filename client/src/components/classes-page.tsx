@@ -27,14 +27,15 @@ export default function ClassesPage() {
   const [selectAll, setSelectAll] = useState(false);
   
   const [formData, setFormData] = useState({
-    majorId: "",
-    year: "",
-    semester: "",
-    academicYear: "",
-    startDate: "",
-    endDate: "",
-    group: "",
-  });
+  majorId: "",
+  year: "",
+  semester: "",
+  academicYear: "",
+  startDate: "",
+  endDate: "",
+  group: "",
+  isActive: "1", // ✅ ADD THIS: Default to active (1)
+});
 
   // Auto-generate academicYear from startDate when academicYear not manually set
   useEffect(() => {
@@ -221,74 +222,91 @@ export default function ClassesPage() {
   };
 
   const openDialog = (cls?: Class) => {
-    if (cls) {
-      setEditingClass(cls);
-      const toInputDate = (v: any) => {
-        if (!v) return "";
-        // If it's a Date object
-        if (v instanceof Date) return v.toISOString().split('T')[0];
-        // If it's a string like '2025-09-01' or '2025-09-01T00:00:00.000Z'
-        if (typeof v === 'string') {
-          const t = v.indexOf('T') >= 0 ? new Date(v) : new Date(v + 'T00:00:00');
-          if (!isNaN(t.getTime())) return t.toISOString().split('T')[0];
-          // Fallback: return original string
-          return v;
-        }
-        return String(v);
-      };
+  if (cls) {
+    setEditingClass(cls);
+    const toInputDate = (v: any) => {
+      if (!v) return "";
+      if (v instanceof Date) return v.toISOString().split('T')[0];
+      if (typeof v === 'string') {
+        const t = v.indexOf('T') >= 0 ? new Date(v) : new Date(v + 'T00:00:00');
+        if (!isNaN(t.getTime())) return t.toISOString().split('T')[0];
+        return v;
+      }
+      return String(v);
+    };
 
-      setFormData({
-        majorId: cls.majorId.toString(),
-        year: cls.year.toString(),
-        semester: cls.semester.toString(),
-        academicYear: cls.academicYear || "",
-        startDate: toInputDate((cls as any).startDate),
-        endDate: toInputDate((cls as any).endDate),
-        group: (cls as any).group || "",
-      });
-    } else {
-      setEditingClass(null);
-      setFormData({ majorId: "", year: "", semester: "", academicYear: "", startDate: "", endDate: "", group: "" });
-    }
-    setIsDialogOpen(true);
-  };
+    setFormData({
+      majorId: cls.majorId.toString(),
+      year: cls.year.toString(),
+      semester: cls.semester.toString(),
+      academicYear: cls.academicYear || "",
+      startDate: toInputDate((cls as any).startDate),
+      endDate: toInputDate((cls as any).endDate),
+      group: (cls as any).group || "",
+      isActive: (cls.isActive ?? 1).toString(), // ✅ ADD THIS
+    });
+  } else {
+    setEditingClass(null);
+    setFormData({ 
+      majorId: "", 
+      year: "", 
+      semester: "", 
+      academicYear: "", 
+      startDate: "", 
+      endDate: "", 
+      group: "",
+      isActive: "1" // ✅ ADD THIS: Default to active
+    });
+  }
+  setIsDialogOpen(true);
+};
 
   const closeDialog = () => {
-    setIsDialogOpen(false);
-    setEditingClass(null);
-    setFormData({ majorId: "", year: "", semester: "", academicYear: "", startDate: "", endDate: "", group: "" });
-  };
+  setIsDialogOpen(false);
+  setEditingClass(null);
+  setFormData({ 
+    majorId: "", 
+    year: "", 
+    semester: "", 
+    academicYear: "", 
+    startDate: "", 
+    endDate: "", 
+    group: "",
+    isActive: "1" // ✅ ADD THIS
+  });
+};
 
   const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!formData.majorId || !formData.year || !formData.semester || !formData.academicYear || !formData.group || !formData.startDate || !formData.endDate) {
-      toast({
-        title: "Error",
-        description: "Please fill in all required fields",
-        variant: "destructive",
-      });
-      return;
-    }
-    // Validate date ordering
-    if (new Date(formData.endDate) < new Date(formData.startDate)) {
-      toast({
-        title: "Error",
-        description: "End date must be the same or after start date",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    saveMutation.mutate({
-      majorId: parseInt(formData.majorId),
-      year: parseInt(formData.year),
-      semester: parseInt(formData.semester),
-      academicYear: formData.academicYear,
-      startDate: formData.startDate,
-      endDate: formData.endDate,
-      group: formData.group.toUpperCase(), // Ensure uppercase
+  e.preventDefault();
+  if (!formData.majorId || !formData.year || !formData.semester || !formData.academicYear || !formData.group || !formData.startDate || !formData.endDate) {
+    toast({
+      title: "Error",
+      description: "Please fill in all required fields",
+      variant: "destructive",
     });
-  };
+    return;
+  }
+  
+  if (new Date(formData.endDate) < new Date(formData.startDate)) {
+    toast({
+      title: "Error",
+      description: "End date must be the same or after start date",
+      variant: "destructive",
+    });
+    return;
+  }
+
+  saveMutation.mutate({
+    majorId: parseInt(formData.majorId),
+    year: parseInt(formData.year),
+    semester: parseInt(formData.semester),
+    academicYear: formData.academicYear,
+    startDate: formData.startDate,
+    endDate: formData.endDate,
+    group: formData.group.toUpperCase(),
+    isActive: parseInt(formData.isActive), // ✅ ADD THIS: Send as number (0 or 1)
+  });
+};
 
   // Generate preview of class name
   const getPreviewName = () => {
@@ -399,6 +417,9 @@ export default function ClassesPage() {
                     <ArrowUpDown className="w-3 h-3" />
                   </button>
                 </th>
+                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
+  Status
+</th>
                 <th className="px-6 py-3 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider">
                   Actions
                 </th>
@@ -459,6 +480,15 @@ export default function ClassesPage() {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span className="text-sm text-gray-900">{cls.academicYear}</span>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <span className={`inline-flex px-2.5 py-1 text-xs font-semibold rounded-full ${
+                        cls.isActive === 1 
+                          ? 'bg-green-100 text-green-800' 
+                          : 'bg-red-100 text-red-800'
+                      }`}>
+                        {cls.isActive === 1 ? 'Active' : 'Inactive'}
+                      </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right">
                       <button
@@ -632,6 +662,24 @@ export default function ClassesPage() {
                   <SelectItem value="2026-2027">2026-2027</SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+            <div>
+              <Label htmlFor="isActive">Status <span className="text-red-500">*</span></Label>
+              <Select 
+                value={formData.isActive} 
+                onValueChange={(value) => setFormData({ ...formData, isActive: value })}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select Status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="1">Active</SelectItem>
+                  <SelectItem value="0">Inactive</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-gray-500 mt-1">
+                Inactive classes won't appear in schedule selections
+              </p>
             </div>
             <DialogFooter>
               <Button type="button" variant="outline" onClick={closeDialog}>

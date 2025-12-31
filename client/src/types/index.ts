@@ -16,22 +16,15 @@ export interface Major {
   department?: Department;
 }
 
-export interface Class {
-  id: number;
-  name: string;
-  majorId: number;
-  year: number;
-  semester: number;
-  startDate?: string;
-  endDate?: string;
-  academicYear: string;
-  group: string; // REQUIRED: M1, M2, A5, etc.
-  classLabel?: string; // Auto-generated compact format: "BDSE Y2S2 M1"
-  displayClassName?: string; // Readable format for dropdowns
-  majorShort?: string; // Cached major short name for quick access
-  createdAt: string;
-  updatedAt: string;
-  major?: Major;
+export interface ClassStatusResponse {
+  hasClass: boolean;
+  isActive: boolean;
+  classInfo?: {
+    id: number;
+    name: string;
+    isActive: number;
+  };
+  message: string;
 }
 
 export interface Subject {
@@ -44,15 +37,61 @@ export interface Subject {
   updatedAt: string;
 }
 
+export interface Class {
+  id: number;
+  name: string;
+  majorId: number;
+  year: number;
+  semester: number;
+  startDate?: string;
+  endDate?: string;
+  academicYear: string;
+  group: string;
+  isActive: number; // ✅ ADD THIS: 0 or 1 (tinyint)
+  classLabel?: string;
+  displayClassName?: string;
+  majorShort?: string;
+  createdAt: string;
+  updatedAt: string;
+  major?: Major;
+}
+
 export interface Semester {
   id: number;
   name: string;
   code: string;
   startDate: string;
   endDate: string;
-  isActive: boolean;
+  isActive: number; // ✅ CHANGE: boolean → number
   createdAt: string;
   updatedAt: string;
+}
+
+export interface Attendance {
+  id: number;
+  userId: number;
+  date: string;
+  status: "present" | "absent" | "leave";
+  isLate: number; // ✅ CHANGE: boolean → number
+  markedAt?: string;
+  markedBy?: number;
+  markedByName?: string;
+  scheduleId?: number;
+  notes?: string;
+  user?: User;
+  schedule?: Schedule;
+}
+
+export interface ClassModerator {
+  id: number;
+  classId: number;
+  userId: number;
+  semesterId: number;
+  isPrimary: number; // ✅ CHANGE: boolean → number
+  createdAt: string;
+  class?: Class;
+  user?: User;
+  semester?: Semester;
 }
 
 export interface User {
@@ -72,32 +111,6 @@ export interface User {
   class?: Class;
 }
 
-export interface ClassModerator {
-  id: number;
-  classId: number;
-  userId: number;
-  semesterId: number;
-  isPrimary: boolean;
-  createdAt: string;
-  class?: Class;
-  user?: User;
-  semester?: Semester;
-}
-
-export interface Attendance {
-  id: number;
-  userId: number;
-  date: string;
-  status: "present" | "absent" | "leave";
-  isLate: boolean;
-  markedAt?: string;
-  markedBy?: number;
-  markedByName?: string;
-  scheduleId?: number;
-  notes?: string;
-  user?: User;
-  schedule?: Schedule;
-}
 
 export interface LeaveRequest {
   id: number;

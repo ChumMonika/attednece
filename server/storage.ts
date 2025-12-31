@@ -40,6 +40,245 @@ export interface ClassModerator {
   createdAt: string;
 }
 
+// Simple in-memory storage fallback
+export class MemStorage implements IStorage {
+  private users: Map<number, User> = new Map();
+  private attendance: Map<number, Attendance> = new Map();
+  private leaveRequests: Map<number, LeaveRequest> = new Map();
+  private schedules: Map<number, Schedule> = new Map();
+  private departments: Map<number, Department> = new Map();
+  private majors: Map<number, Major> = new Map();
+  private classes: Map<number, Class> = new Map();
+  private subjects: Map<number, Subject> = new Map();
+  private currentUserId = 1;
+  private currentAttendanceId = 1;
+  private currentLeaveRequestId = 1;
+  private currentScheduleId = 1;
+  private currentDepartmentId = 1;
+  private currentMajorId = 1;
+  private currentClassId = 1;
+  private currentSubjectId = 1;
+
+  // User management
+  async getUser(id: number): Promise<User | undefined> {
+    return this.users.get(id);
+  }
+
+  async getUserByUniqueId(uniqueId: string): Promise<User | undefined> {
+    for (const u of this.users.values()) {
+      if (u.uniqueId === uniqueId) return u;
+    }
+    return undefined;
+  }
+
+  async getUserById(id: number): Promise<User | undefined> {
+    return this.getUser(id);
+  }
+
+  async getAllUsers(): Promise<User[]> {
+    return Array.from(this.users.values());
+  }
+
+  async createUser(insertUser: InsertUser): Promise<User> {
+    const now = new Date();
+    const id = this.currentUserId++;
+    const user: any = {
+      id,
+      ...insertUser,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.users.set(id, user);
+    return user;
+  }
+
+  async updateUser(id: number, updates: Partial<User>): Promise<User | undefined> {
+    const u = this.users.get(id);
+    if (!u) return undefined;
+    const updated = { ...u, ...updates, updatedAt: new Date() } as any;
+    this.users.set(id, updated);
+    return updated;
+  }
+
+  async deleteUser(id: number): Promise<boolean> {
+    return this.users.delete(id);
+  }
+
+  // Attendance
+  async getAttendance(userId: number): Promise<Attendance[]> {
+    return Array.from(this.attendance.values()).filter(a => a.userId === userId);
+  }
+
+  async getAllAttendance(): Promise<Attendance[]> {
+    return Array.from(this.attendance.values()).sort((a,b) => (new Date(b.date).getTime() - new Date(a.date).getTime()));
+  }
+
+  async getAttendanceByDate(date: string): Promise<Attendance[]> {
+    return Array.from(this.attendance.values()).filter(a => String(a.date).slice(0,10) === String(date).slice(0,10));
+  }
+
+  async getAttendanceByDepartment(_department: string): Promise<Attendance[]> {
+    // naive: return all attendance where user's departmentId matches
+    const deptId = Number(_department);
+    return Array.from(this.attendance.values()).filter(a => {
+      const u = this.users.get(a.userId as number);
+      return u && u.departmentId === deptId;
+    });
+  }
+
+  async getDepartmentSummary(): Promise<any> {
+    // Simple summary
+    const allUsers = await this.getAllUsers();
+    const allAttendance = await this.getAllAttendance();
+    const map = new Map<number, any>();
+    for (const u of allUsers) {
+      if (!u.departmentId) continue;
+      if (!map.has(u.departmentId)) map.set(u.departmentId, { department: u.departmentId, totalStaff: 0, present: 0, absent: 0, onLeave: 0 });
+      map.get(u.departmentId).totalStaff++;
+    }
+    const today = new Date().toISOString().slice(0,10);
+    for (const a of allAttendance) {
+      if (String(a.date).slice(0,10) !== today) continue;
+      const u = this.users.get(a.userId as number);
+      if (!u || !u.departmentId) continue;
+      const entry = map.get(u.departmentId);
+      if (!entry) continue;
+      if (a.status === 'present') entry.present++;
+      if (a.status === 'absent') entry.absent++;
+      if (a.status === 'leave') entry.onLeave++;
+    }
+    return Array.from(map.values());
+  }
+
+  async markAttendance(insertAttendance: InsertAttendance): Promise<Attendance> {
+    // find existing by userId+date
+    for (const a of this.attendance.values()) {
+      if (a.userId === insertAttendance.userId && String(a.date).slice(0,10) === String(insertAttendance.date).slice(0,10)) {
+        const updated = { ...a, ...insertAttendance } as any;
+        this.attendance.set(a.id as number, updated);
+        return updated;
+      }
+    }
+    const id = this.currentAttendanceId++;
+    const now = new Date();
+    const record: any = { id, ...insertAttendance, markedAt: insertAttendance.markedAt || now };
+    this.attendance.set(id, record);
+    return record;
+  }
+
+  // Leave requests
+  async getLeaveRequests(userId?: number): Promise<LeaveRequest[]> {
+    let arr = Array.from(this.leaveRequests.values()).sort((a,b) => (new Date(b.submittedAt as any).getTime() - new Date(a.submittedAt as any).getTime()));
+    if (userId) arr = arr.filter(l => l.userId === userId);
+    return arr;
+  }
+
+  async getPendingLeaveRequests(): Promise<LeaveRequest[]> {
+    return Array.from(this.leaveRequests.values()).filter(l => l.status === 'pending');
+  }
+
+  async createLeaveRequest(request: InsertLeaveRequest): Promise<LeaveRequest> {
+    const id = this.currentLeaveRequestId++;
+    const now = new Date();
+    const r: any = { id, ...request, status: 'pending', submittedAt: now };
+    this.leaveRequests.set(id, r);
+    return r;
+  }
+
+  async updateLeaveRequest(id: number, updates: Partial<LeaveRequest>): Promise<LeaveRequest | undefined> {
+    const ex = this.leaveRequests.get(id);
+    if (!ex) return undefined;
+    const updated = { ...ex, ...updates } as any;
+    this.leaveRequests.set(id, updated);
+    return updated;
+  }
+
+  // Schedule management (basic)
+  async getAllSchedules(): Promise<Schedule[]> { return Array.from(this.schedules.values()); }
+  async getSchedulesByDay(day: string): Promise<Schedule[]> { return Array.from(this.schedules.values()).filter(s => s.day === day); }
+  async getSchedulesByTeacher(teacherId: number): Promise<Schedule[]> { return Array.from(this.schedules.values()).filter(s => s.teacherId === teacherId); }
+  async getSchedulesByMajor(_major: string): Promise<Schedule[]> { return Array.from(this.schedules.values()); }
+  async getSchedulesByClass(classId: number): Promise<Schedule[]> { return Array.from(this.schedules.values()).filter(s => s.classId === classId); }
+  async createSchedule(schedule: InsertSchedule): Promise<Schedule> { const id = this.currentScheduleId++; const now = new Date(); const s:any={ id, ...schedule, createdAt: now, updatedAt: now }; this.schedules.set(id,s); return s; }
+  async createBulkSchedules(schedulesList: InsertSchedule[]): Promise<Schedule[]> { const created: Schedule[] = []; for (const sch of schedulesList) created.push(await this.createSchedule(sch)); return created; }
+  async validateScheduleConflict(): Promise<{ hasConflict: boolean; type?: string; details?: string }> { return { hasConflict: false }; }
+  async updateSchedule(id: number, updates: Partial<Schedule>): Promise<Schedule | undefined> { const s = this.schedules.get(id); if (!s) return undefined; const updated = { ...s, ...updates }; this.schedules.set(id, updated as any); return updated as any; }
+  async deleteSchedule(id: number): Promise<boolean> { return this.schedules.delete(id); }
+  async getScheduleById(id: number): Promise<Schedule | undefined> { return this.schedules.get(id); }
+
+  // Departments
+  async getAllDepartments(): Promise<Department[]> { return Array.from(this.departments.values()); }
+  async getDepartmentById(id: number): Promise<Department | undefined> { return this.departments.get(id); }
+  async getDepartment(id: number): Promise<Department | undefined> { return this.getDepartmentById(id); }
+  async createDepartment(department: InsertDepartment): Promise<Department> { const id = this.currentDepartmentId++; const now=new Date(); const d:any={ id, ...department, createdAt: now, updatedAt: now }; this.departments.set(id,d); return d; }
+  async updateDepartment(id: number, updates: Partial<Department>): Promise<Department | undefined> { const d=this.departments.get(id); if(!d) return undefined; const u={...d,...updates}; this.departments.set(id,u as any); return u as any; }
+  async deleteDepartment(id: number): Promise<boolean> { return this.departments.delete(id); }
+
+  // Majors
+  async getAllMajors(): Promise<Major[]> { return Array.from(this.majors.values()); }
+  async getMajorById(id: number): Promise<Major | undefined> { return this.majors.get(id); }
+  async getMajorsByDepartment(departmentId: number): Promise<Major[]> { return Array.from(this.majors.values()).filter(m => m.departmentId === departmentId); }
+  async createMajor(major: InsertMajor): Promise<Major> { const id = this.currentMajorId++; const now=new Date(); const m:any={ id, ...major, createdAt: now, updatedAt: now }; this.majors.set(id,m); return m; }
+  async updateMajor(id: number, updates: Partial<Major>): Promise<Major | undefined> { const m=this.majors.get(id); if(!m) return undefined; const u={...m,...updates}; this.majors.set(id,u as any); return u as any; }
+  async deleteMajor(id: number): Promise<boolean> { return this.majors.delete(id); }
+
+  // Classes
+  async getAllClasses(): Promise<Class[]> { return Array.from(this.classes.values()); }
+  async getClassById(id: number): Promise<Class | undefined> { return this.classes.get(id); }
+  async getClassesByMajors(majorIds: number[]): Promise<Class[]> { return Array.from(this.classes.values()).filter(c => majorIds.includes(c.majorId)); }
+  async createClass(classData: InsertClass & { name: string }): Promise<Class> { const id=this.currentClassId++; const now=new Date(); const c:any={ id, ...classData, createdAt: now, updatedAt: now }; this.classes.set(id,c); return c; }
+  async updateClass(id: number, updates: Partial<Class>): Promise<Class | undefined> { const c=this.classes.get(id); if(!c) return undefined; const u={...c,...updates}; this.classes.set(id,u as any); return u as any; }
+  async deleteClass(id: number): Promise<boolean> { return this.classes.delete(id); }
+
+  // Subjects
+  async getAllSubjects(): Promise<Subject[]> { return Array.from(this.subjects.values()); }
+  async getSubjectById(id: number): Promise<Subject | undefined> { return this.subjects.get(id); }
+  async createSubject(subject: InsertSubject): Promise<Subject> { const id=this.currentSubjectId++; const now=new Date(); const s:any={ id, ...subject, createdAt: now, updatedAt: now }; this.subjects.set(id,s); return s; }
+  async updateSubject(id: number, updates: Partial<Subject>): Promise<Subject | undefined> { const s=this.subjects.get(id); if(!s) return undefined; const u={...s,...updates}; this.subjects.set(id,u as any); return u as any; }
+  async deleteSubject(id: number): Promise<boolean> { return this.subjects.delete(id); }
+
+  // Class Moderator management - simplified using users.classId
+  async getAllClassModerators(): Promise<ClassModerator[]> {
+    const out: ClassModerator[] = [];
+    for (const u of this.users.values()) {
+      if (u.role === 'class_moderator' || u.role === 'moderator') {
+        out.push({ id: u.id, classId: u.classId || 0, userId: u.id, semesterId: 0, isPrimary: true, createdAt: (u.createdAt as any) });
+      }
+    }
+    return out;
+  }
+
+  async getClassModeratorsByClass(classId: number): Promise<ClassModerator[]> {
+    return (await this.getAllClassModerators()).filter(cm => cm.classId === classId);
+  }
+
+  async getClassModeratorsByUser(userId: number): Promise<ClassModerator[]> {
+    const u = this.users.get(userId);
+    if (!u || !u.classId) return [];
+    return [{ id: userId, classId: u.classId, userId, semesterId: 0, isPrimary: true, createdAt: (u.createdAt as any) }];
+  }
+
+  async createClassModerator(moderator: InsertClassModerator): Promise<ClassModerator> {
+    // set user's classId
+    const u = this.users.get(moderator.userId as number);
+    if (u) {
+      u.classId = moderator.classId;
+      this.users.set(u.id, u);
+      return { id: u.id, classId: u.classId as number, userId: u.id, semesterId: moderator.semesterId || 0, isPrimary: !!moderator.isPrimary, createdAt: (u.createdAt as any) };
+    }
+    const id = moderator.userId || 0;
+    return { id, classId: moderator.classId, userId: moderator.userId, semesterId: moderator.semesterId || 0, isPrimary: !!moderator.isPrimary, createdAt: new Date() };
+  }
+
+  async deleteClassModerator(id: number): Promise<boolean> {
+    const u = this.users.get(id);
+    if (!u) return false;
+    u.classId = null as any;
+    this.users.set(u.id, u);
+    return true;
+  }
+}
+
 export interface InsertClassModerator {
   classId: number;
   userId: number;
@@ -123,7 +362,7 @@ export interface IStorage {
   deleteClassModerator(id: number): Promise<boolean>;
 }
 
-export class MemStorage implements IStorage {
+export class MySQLStorage implements IStorage {
   private users: Map<number, User>;
   private attendance: Map<number, Attendance>;
   private leaveRequests: Map<number, LeaveRequest>;
@@ -132,9 +371,7 @@ export class MemStorage implements IStorage {
   private majors: Map<number, Major>;
   private classes: Map<number, Class>;
   private subjects: Map<number, Subject>;
-  private semesters: Map<number, Semester>;
   private classModerators: Map<number, ClassModerator>;
-  private classSubjects: Map<number, ClassSubject>;
   private currentUserId: number;
   private currentAttendanceId: number;
   private currentLeaveRequestId: number;
@@ -146,8 +383,10 @@ export class MemStorage implements IStorage {
   private currentSemesterId: number;
   private currentClassModeratorId: number;
   private currentClassSubjectId: number;
+  private db: any;
 
   constructor() {
+    // keep Maps for compatibility in case some code expects them; primary storage is MySQL via `this.db`
     this.users = new Map();
     this.attendance = new Map();
     this.leaveRequests = new Map();
@@ -156,9 +395,7 @@ export class MemStorage implements IStorage {
     this.majors = new Map();
     this.classes = new Map();
     this.subjects = new Map();
-    this.semesters = new Map();
     this.classModerators = new Map();
-    this.classSubjects = new Map();
     this.currentUserId = 1;
     this.currentAttendanceId = 1;
     this.currentLeaveRequestId = 1;
@@ -170,878 +407,24 @@ export class MemStorage implements IStorage {
     this.currentSemesterId = 1;
     this.currentClassModeratorId = 1;
     this.currentClassSubjectId = 1;
-    
-    // Initialize with sample data
-    this.initializeSampleData();
-  }
 
-  private initializeSampleData() {
-    // Initialize departments first
-    const now = new Date().toISOString();
-    const sampleDepartments = [
-      { name: "Computer Science", code: "CS", createdAt: now, updatedAt: now },
-      { name: "Mathematics", code: "MATH", createdAt: now, updatedAt: now },
-      { name: "Administration", code: "ADM", createdAt: now, updatedAt: now },
-      { name: "IT Support", code: "IT", createdAt: now, updatedAt: now },
-    ];
-    sampleDepartments.forEach(dept => {
-      const department: Department = { ...dept, id: this.currentDepartmentId++ };
-      this.departments.set(department.id, department);
-    });
-
-    // Initialize majors
-    const sampleMajors = [
-      { name: "Data Science and Engineering", code: "DSE", departmentId: 1, createdAt: now, updatedAt: now },
-      { name: "Software Engineering", code: "SE", departmentId: 1, createdAt: now, updatedAt: now },
-    ];
-    sampleMajors.forEach(maj => {
-      const major: Major = { ...maj, id: this.currentMajorId++ };
-      this.majors.set(major.id, major);
-    });
-
-    // Initialize classes
-    const sampleClasses = [
-      { name: "DSE Year 1", code: "DSE-Y1", majorId: 1, year: 1, startDate: "2025-09-01", endDate: "2025-12-31", academicYear: "2025-2026", createdAt: now, updatedAt: now },
-      { name: "DSE Year 2", code: "DSE-Y2", majorId: 1, year: 2, startDate: "2025-09-01", endDate: "2025-12-31", academicYear: "2025-2026", createdAt: now, updatedAt: now },
-      { name: "DSE Year 3", code: "DSE-Y3", majorId: 1, year: 3, startDate: "2025-09-01", endDate: "2025-12-31", academicYear: "2025-2026", createdAt: now, updatedAt: now },
-    ];
-    sampleClasses.forEach(cls => {
-      const classObj: Class = { ...cls, id: this.currentClassId++ };
-      this.classes.set(classObj.id, classObj);
-    });
-
-    // Initialize subjects
-    const sampleSubjects = [
-      { name: "Database Design and Management", code: "CS301", credits: 3, createdAt: now, updatedAt: now },
-      { name: "Data Structures and Algorithms", code: "CS302", credits: 3, createdAt: now, updatedAt: now },
-      { name: "Machine Learning", code: "CS401", credits: 3, createdAt: now, updatedAt: now },
-      { name: "Project Practicum", code: "CS499", credits: 4, createdAt: now, updatedAt: now },
-    ];
-    sampleSubjects.forEach(subj => {
-      const subject: Subject = { ...subj, id: this.currentSubjectId++ };
-      this.subjects.set(subject.id, subject);
-    });
-
-    // Initialize semesters
-    const sampleSemesters = [
-      { name: "Fall 2025", code: "FALL-2025", startDate: "2025-09-01", endDate: "2025-12-31", isActive: true, createdAt: now, updatedAt: now },
-      { name: "Spring 2026", code: "SPRING-2026", startDate: "2026-01-01", endDate: "2026-05-31", isActive: false, createdAt: now, updatedAt: now },
-    ];
-    sampleSemesters.forEach(sem => {
-      const semester: Semester = { ...sem, id: this.currentSemesterId++ };
-      this.semesters.set(semester.id, semester);
-    });
-
-    // Sample users for different roles
-    const sampleUsers = [
-      {
-        uniqueId: "H001",
-        name: "Dr. Sarah Williams",
-        email: "sarah.williams@university.edu",
-        password: "password123",
-        role: "head" as const,
-        departmentId: 1,
-        workType: "Full-Time",
-        schedule: "08:00-17:00",
-        status: "active" as const,
-        createdAt: now,
-        updatedAt: now
-      },
-      {
-        uniqueId: "A001",
-        name: "Admin User",
-        email: "admin@university.edu",
-        password: "password123",
-        role: "admin" as const,
-        departmentId: 3,
-        workType: "Full-Time",
-        schedule: "08:00-17:00",
-        status: "active" as const,
-        createdAt: now,
-        updatedAt: now
-      },
-      {
-        uniqueId: "MOD001",
-        name: "Class Moderator",
-        email: "moderator@university.edu",
-        password: "password123",
-        role: "moderator" as const,
-        departmentId: 1,
-        workType: "Full-Time",
-        schedule: "08:00-17:00",
-        status: "active" as const,
-        createdAt: now,
-        updatedAt: now
-      },
-      {
-        uniqueId: "HR001",
-        name: "HR Assistant",
-        email: "hr@university.edu",
-        password: "password123",
-        role: "hr_assistant" as const,
-        departmentId: 3,
-        workType: "Full-Time",
-        schedule: "08:00-17:00",
-        status: "active" as const,
-        createdAt: now,
-        updatedAt: now
-      },
-      {
-        uniqueId: "T001",
-        name: "Chamroeum",
-        email: "chamroeum@university.edu",
-        password: "password123",
-        role: "teacher" as const,
-        departmentId: 1,
-        workType: "Full-Time",
-        schedule: "07:00-11:00",
-        status: "active" as const,
-        createdAt: now,
-        updatedAt: now
-      },
-      {
-        uniqueId: "T002",
-        name: "Vantha",
-        email: "vantha@university.edu",
-        password: "password123",
-        role: "teacher" as const,
-        departmentId: 1,
-        workType: "Full-Time",
-        schedule: "07:00-11:00",
-        status: "active" as const,
-        createdAt: now,
-        updatedAt: now
-      },
-      {
-        uniqueId: "T003",
-        name: "Buncchun",
-        email: "buncchun@university.edu",
-        password: "password123",
-        role: "teacher" as const,
-        departmentId: 1,
-        workType: "Full-Time",
-        schedule: "07:00-12:00",
-        status: "active" as const,
-        createdAt: now,
-        updatedAt: now
-      },
-      {
-        uniqueId: "S001",
-        name: "Ms. Vanna",
-        email: "vanna@university.edu",
-        password: "password123",
-        role: "staff" as const,
-        departmentId: 4,
-        workType: "IT-Full-Time",
-        schedule: "08:00-17:00",
-        status: "active" as const,
-        createdAt: now,
-        updatedAt: now
-      },
-      {
-        uniqueId: "S002",
-        name: "Mr. Dara",
-        email: "dara@university.edu",
-        password: "password123",
-        role: "staff" as const,
-        departmentId: 4,
-        workType: "IT-Part-Time",
-        schedule: "08:00-12:00",
-        status: "active" as const,
-        createdAt: now,
-        updatedAt: now
-      }
-    ];
-
-    sampleUsers.forEach(userData => {
-      const user: User = { ...userData, id: this.currentUserId++ };
-      this.users.set(user.id, user);
-    });
-
-    // Sample attendance data
-    const today = new Date().toISOString().split('T')[0];
-    const sampleAttendance = [
-      { userId: 5, date: today, status: "present" as const, isLate: false, markedAt: new Date().toISOString(), markedBy: 3 }, // T001 marked by moderator
-      { userId: 6, date: today, status: "present" as const, isLate: false, markedAt: new Date().toISOString(), markedBy: 3 }, // T002 marked by moderator
-      { userId: 7, date: today, status: "present" as const, isLate: true, markedAt: new Date().toISOString(), markedBy: 3 }, // T003 marked late by moderator
-      { userId: 8, date: today, status: "present" as const, isLate: false, markedAt: new Date().toISOString(), markedBy: 4 }, // S001 marked by hr_assistant
-      { userId: 9, date: today, status: "present" as const, isLate: false, markedAt: new Date().toISOString(), markedBy: 4 }, // S002 marked by hr_assistant
-    ];
-
-    sampleAttendance.forEach(attData => {
-      const attendance: Attendance = { ...attData, id: this.currentAttendanceId++ };
-      this.attendance.set(attendance.id, attendance);
-    });
-
-    // Sample leave requests
-    const sampleLeaveRequests = [
-      {
-        userId: 6, // T002 (Vantha)
-        leaveType: "Personal Leave",
-        startDate: "2024-01-25",
-        endDate: "2024-01-26",
-        reason: "Family event to attend",
-        status: "pending",
-        submittedAt: new Date().toISOString(),
-      },
-      {
-        userId: 7, // T003 (Buncchun) - already on leave
-        leaveType: "Medical Leave",
-        startDate: today,
-        endDate: today,
-        reason: "Medical appointment",
-        status: "approved",
-        submittedAt: new Date(Date.now() - 86400000).toISOString(),
-        respondedAt: new Date().toISOString(),
-        respondedBy: 1,
-      }
-    ];
-
-    sampleLeaveRequests.forEach(reqData => {
-      const request: LeaveRequest = { 
-        ...reqData, 
-        id: this.currentLeaveRequestId++,
-        respondedAt: reqData.respondedAt || null,
-        respondedBy: reqData.respondedBy || null,
-        rejectionReason: null
-      };
-      this.leaveRequests.set(request.id, request);
-    });
-
-    // Sample schedules with semester-based structure
-    const sampleSchedules = [
-      {
-        semesterId: 1, // Fall 2025
-        classId: 1, // DSE Year 1
-        subjectId: 1, // Database Design and Management
-        teacherId: 5, // Chamroeum
-        day: "Monday",
-        startTime: "07:00",
-        endTime: "11:00",
-        room: "Room 301",
-        createdAt: now,
-        updatedAt: now
-      },
-      {
-        semesterId: 1,
-        classId: 2, // DSE Year 2
-        subjectId: 2, // Data Structures and Algorithms
-        teacherId: 6, // Vantha
-        day: "Tuesday",
-        startTime: "07:00",
-        endTime: "11:00",
-        room: "Room 302",
-        createdAt: now,
-        updatedAt: now
-      },
-      {
-        semesterId: 1,
-        classId: 3, // DSE Year 3
-        subjectId: 3, // Machine Learning
-        teacherId: 7, // Buncchun
-        day: "Wednesday",
-        startTime: "07:00",
-        endTime: "10:00",
-        room: "Room 303",
-        createdAt: now,
-        updatedAt: now
-      },
-      {
-        semesterId: 1,
-        classId: 3, // DSE Year 3
-        subjectId: 4, // Project Practicum
-        teacherId: 7, // Buncchun
-        day: "Thursday",
-        startTime: "10:00",
-        endTime: "12:00",
-        room: "Room 304",
-        createdAt: now,
-        updatedAt: now
-      },
-    ];
-
-    sampleSchedules.forEach(scheduleData => {
-      const schedule: Schedule = { 
-        ...scheduleData, 
-        id: this.currentScheduleId++
-      };
-      this.schedules.set(schedule.id, schedule);
-    });
-  }
-
-  // User Management Methods
-
-  async getUser(id: number): Promise<User | undefined> {
-    return this.users.get(id);
-  }
-
-  async getUserByUniqueId(uniqueId: string): Promise<User | undefined> {
-    return Array.from(this.users.values()).find(user => user.uniqueId === uniqueId);
-  }
-
-  async getUserById(id: number): Promise<User | undefined> {
-    return this.users.get(id);
-  }
-
-  async getAllUsers(): Promise<User[]> {
-    return Array.from(this.users.values());
-  }
-
-  async createUser(insertUser: InsertUser): Promise<User> {
-    const id = this.currentUserId++;
-    const user: User = { 
-      ...insertUser, 
-      id, 
-      status: "active",
-      email: insertUser.email || null,
-      departmentId: insertUser.departmentId || null,
-      workType: insertUser.workType || null,
-      schedule: insertUser.schedule || null,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    };
-    this.users.set(id, user);
-    return user;
-  }
-
-  async updateUser(id: number, updates: Partial<User>): Promise<User | undefined> {
-    const user = this.users.get(id);
-    if (!user) return undefined;
-    
-    const updatedUser = { ...user, ...updates };
-    this.users.set(id, updatedUser);
-    return updatedUser;
-  }
-
-  async deleteUser(id: number): Promise<boolean> {
-    return this.users.delete(id);
-  }
-
-  async getAttendance(userId: number): Promise<Attendance[]> {
-    return Array.from(this.attendance.values()).filter(att => att.userId === userId);
-  }
-
-  async getAllAttendance(): Promise<Attendance[]> {
-    return Array.from(this.attendance.values());
-  }
-
-  async getAttendanceByDate(date: string): Promise<Attendance[]> {
-    return Array.from(this.attendance.values()).filter(att => att.date === date);
-  }
-
-  async getAttendanceByDepartment(departmentId: number): Promise<Attendance[]> {
-    if (!departmentId) return this.getAllAttendance();
-    
-    const departmentUsers = Array.from(this.users.values()).filter(user => user.departmentId === departmentId);
-    const userIds = departmentUsers.map(user => user.id);
-    
-    return Array.from(this.attendance.values()).filter(att => userIds.includes(att.userId));
-  }
-
-  async getDepartmentSummary(): Promise<any> {
-    const today = new Date().toISOString().split('T')[0];
-    const todayAttendance = await this.getAttendanceByDate(today);
-    const allUsers = Array.from(this.users.values());
-    const allDepartments = Array.from(this.departments.values());
-    
-    const summary = allDepartments.map(department => {
-      const deptUsers = allUsers.filter(user => user.departmentId === department.id);
-      const deptAttendance = todayAttendance.filter(att => 
-        deptUsers.some(user => user.id === att.userId)
-      );
-      
-      const present = deptAttendance.filter(att => att.status === "present").length;
-      const absent = deptAttendance.filter(att => att.status === "absent").length;
-      const onLeave = deptAttendance.filter(att => att.status === "leave").length;
-      const notMarked = deptUsers.length - deptAttendance.length;
-      
-      return {
-        department: department.name,
-        departmentId: department.id,
-        totalStaff: deptUsers.length,
-        present,
-        absent,
-        onLeave,
-        notMarked,
-        attendanceRate: deptUsers.length > 0 ? Math.round((present / deptUsers.length) * 100) : 0
-      };
-    });
-    
-    return summary;
-  }
-
-  async markAttendance(insertAttendance: InsertAttendance): Promise<Attendance> {
-    const id = this.currentAttendanceId++;
-    const attendance: Attendance = { 
-      ...insertAttendance, 
-      id,
-      markedAt: insertAttendance.markedAt || null,
-      markedBy: insertAttendance.markedBy || null
-    };
-    this.attendance.set(id, attendance);
-    return attendance;
-  }
-
-  async getLeaveRequests(userId?: number): Promise<LeaveRequest[]> {
-    const requests = Array.from(this.leaveRequests.values());
-    return userId ? requests.filter(req => req.userId === userId) : requests;
-  }
-
-  async getPendingLeaveRequests(): Promise<LeaveRequest[]> {
-    return Array.from(this.leaveRequests.values()).filter(req => req.status === "pending");
-  }
-
-  async createLeaveRequest(insertRequest: InsertLeaveRequest): Promise<LeaveRequest> {
-    if (typeof insertRequest.userId !== 'number') {
-      throw new Error('userId is required for leave request');
+    // Initialize MySQL connection pool for Drizzle
+    try {
+      const pool = mysql.createPool({
+        host: process.env.MYSQL_HOST || process.env.DB_HOST || 'localhost',
+        port: Number(process.env.MYSQL_PORT || process.env.DB_PORT || 3306),
+        user: process.env.MYSQL_USER || process.env.DB_USER || 'root',
+        password: process.env.MYSQL_PASSWORD || process.env.DB_PASSWORD || '',
+        database: process.env.MYSQL_DATABASE || process.env.DB_NAME || 'university_staff_tracker',
+        connectionLimit: 10,
+      });
+      this.db = drizzle(pool);
+      console.log('🔌 MySQLStorage: connected to database');
+    } catch (err) {
+      console.error('MySQLStorage: failed to create DB pool', err);
+      // Rethrow so the caller can fall back to in-memory storage
+      throw err;
     }
-    const id = this.currentLeaveRequestId++;
-    const request: LeaveRequest = {
-      id,
-      userId: insertRequest.userId,
-      leaveType: insertRequest.leaveType,
-      startDate: insertRequest.startDate,
-      endDate: insertRequest.endDate,
-      reason: insertRequest.reason,
-      status: "pending",
-      submittedAt: new Date(),
-      respondedAt: null,
-      respondedBy: null,
-      rejectionReason: null
-    };
-    this.leaveRequests.set(id, request);
-    return request;
-  }
-
-  async updateLeaveRequest(id: number, updates: Partial<LeaveRequest>): Promise<LeaveRequest | undefined> {
-    console.log('🔍 Memory updateLeaveRequest - Starting update');
-    console.log('🆔 Request ID:', id);
-    console.log('📝 Updates:', updates);
-    
-    const request = this.leaveRequests.get(id);
-    if (!request) {
-      console.log('❌ Memory updateLeaveRequest - No record found with id:', id);
-      return undefined;
-    }
-    
-    const updatedRequest = { ...request, ...updates };
-    this.leaveRequests.set(id, updatedRequest);
-    console.log('✅ Memory updateLeaveRequest - Success:', updatedRequest);
-    return updatedRequest;
-  }
-
-  // Schedule management
-  async getAllSchedules(): Promise<Schedule[]> {
-    return Array.from(this.schedules.values());
-  }
-
-  async getSchedulesByDay(day: string): Promise<Schedule[]> {
-    return Array.from(this.schedules.values()).filter(schedule => schedule.day === day);
-  }
-
-  async getSchedulesByTeacher(teacherId: number): Promise<Schedule[]> {
-    return Array.from(this.schedules.values()).filter(schedule => schedule.teacherId === teacherId);
-  }
-
-  async getSchedulesBySemester(semesterId: number): Promise<Schedule[]> {
-    return Array.from(this.schedules.values()).filter(schedule => schedule.semesterId === semesterId);
-  }
-
-  async getSchedulesByClass(classId: number): Promise<Schedule[]> {
-    return Array.from(this.schedules.values()).filter(schedule => schedule.classId === classId);
-  }
-
-  async createSchedule(schedule: InsertSchedule): Promise<Schedule> {
-    const id = this.currentScheduleId++;
-    const newSchedule: Schedule = {
-      ...schedule,
-      id,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    };
-    this.schedules.set(id, newSchedule);
-    return newSchedule;
-  }
-
-  async updateSchedule(id: number, updates: Partial<Schedule>): Promise<Schedule | undefined> {
-    const schedule = this.schedules.get(id);
-    if (!schedule) return undefined;
-
-    const updatedSchedule = { ...schedule, ...updates, updatedAt: new Date().toISOString() };
-    this.schedules.set(id, updatedSchedule);
-    return updatedSchedule;
-  }
-
-  async deleteSchedule(id: number): Promise<boolean> {
-    return this.schedules.delete(id);
-  }
-
-  async validateScheduleConflict(
-    teacherId: number,
-    day: string,
-    startTime: string,
-    endTime: string,
-    excludeScheduleId?: number,
-    classId?: number
-  ): Promise<{ hasConflict: boolean; type?: string; details?: string }> {
-    // Get all schedules for this teacher on this day
-    const teacherSchedules = Array.from(this.schedules.values()).filter(
-      schedule => 
-        schedule.teacherId === teacherId &&
-        schedule.day === day &&
-        (!excludeScheduleId || schedule.id !== excludeScheduleId)
-    );
-
-    // Check for teacher time conflicts
-    for (const schedule of teacherSchedules) {
-      const existingStart = schedule.startTime;
-      const existingEnd = schedule.endTime;
-      
-      const hasConflict = (
-        (startTime >= existingStart && startTime < existingEnd) || 
-        (endTime > existingStart && endTime <= existingEnd) || 
-        (startTime <= existingStart && endTime >= existingEnd)
-      );
-      
-      if (hasConflict) {
-        return { 
-          hasConflict: true, 
-          type: 'teacher', 
-          details: `Teacher already scheduled on ${day} at ${existingStart}-${existingEnd}` 
-        };
-      }
-    }
-
-    // Check for class time conflicts if classId provided
-    if (classId) {
-      const classSchedules = Array.from(this.schedules.values()).filter(
-        schedule => 
-          schedule.classId === classId &&
-          schedule.day === day &&
-          (!excludeScheduleId || schedule.id !== excludeScheduleId)
-      );
-
-      for (const schedule of classSchedules) {
-        const existingStart = schedule.startTime;
-        const existingEnd = schedule.endTime;
-        
-        const hasConflict = (
-          (startTime >= existingStart && startTime < existingEnd) || 
-          (endTime > existingStart && endTime <= existingEnd) || 
-          (startTime <= existingStart && endTime >= existingEnd)
-        );
-        
-        if (hasConflict) {
-          return { 
-            hasConflict: true, 
-            type: 'class', 
-            details: `Class already scheduled on ${day} at ${existingStart}-${existingEnd}` 
-          };
-        }
-      }
-    }
-    
-    return { hasConflict: false };
-  }
-
-  async createBulkSchedules(scheduleList: InsertSchedule[]): Promise<Schedule[]> {
-    const createdSchedules: Schedule[] = [];
-    const conflicts: string[] = [];
-
-    // Validate all schedules first
-    for (let i = 0; i < scheduleList.length; i++) {
-      const schedule = scheduleList[i];
-      const conflictResult = await this.validateScheduleConflict(
-        schedule.teacherId,
-        schedule.day,
-        schedule.startTime,
-        schedule.endTime,
-        undefined,
-        schedule.classId
-      );
-      
-      if (conflictResult.hasConflict) {
-        conflicts.push(`Slot ${i + 1}: ${conflictResult.type} conflict - ${conflictResult.details}`);
-      }
-
-      // Check for duplicate subject+day within the same class
-      const duplicates = scheduleList.filter((s, idx) => 
-        idx !== i && 
-        s.classId === schedule.classId && 
-        s.subjectId === schedule.subjectId && 
-        s.day === schedule.day
-      );
-      if (duplicates.length > 0) {
-        conflicts.push(`Slot ${i + 1}: Duplicate subject on same day for this class`);
-      }
-    }
-
-    if (conflicts.length > 0) {
-      throw new Error(`Schedule conflicts detected:\n${conflicts.join('\n')}`);
-    }
-
-    // Insert all schedules
-    for (const schedule of scheduleList) {
-      const id = this.currentScheduleId++;
-      const newSchedule: Schedule = {
-        ...schedule,
-        id,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      };
-      this.schedules.set(id, newSchedule);
-      createdSchedules.push(newSchedule);
-    }
-
-    return createdSchedules;
-  }
-
-  async getScheduleById(id: number): Promise<Schedule | undefined> {
-    return this.schedules.get(id);
-  }
-
-  // Department Management
-  async getAllDepartments(): Promise<Department[]> {
-    return Array.from(this.departments.values());
-  }
-
-  async getDepartmentById(id: number): Promise<Department | undefined> {
-    return this.departments.get(id);
-  }
-
-  async createDepartment(department: InsertDepartment): Promise<Department> {
-    const id = this.currentDepartmentId++;
-    const newDepartment: Department = {
-      ...department,
-      id,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    };
-    this.departments.set(id, newDepartment);
-    return newDepartment;
-  }
-
-  async updateDepartment(id: number, updates: Partial<Department>): Promise<Department | undefined> {
-    const department = this.departments.get(id);
-    if (!department) return undefined;
-
-    const updatedDepartment = { ...department, ...updates, updatedAt: new Date().toISOString() };
-    this.departments.set(id, updatedDepartment);
-    return updatedDepartment;
-  }
-
-  async deleteDepartment(id: number): Promise<boolean> {
-    return this.departments.delete(id);
-  }
-
-  // Major Management
-  async getAllMajors(): Promise<Major[]> {
-    return Array.from(this.majors.values());
-  }
-
-  async getMajorById(id: number): Promise<Major | undefined> {
-    return this.majors.get(id);
-  }
-
-  async getMajorsByDepartment(departmentId: number): Promise<Major[]> {
-    return Array.from(this.majors.values()).filter(major => major.departmentId === departmentId);
-  }
-
-  async createMajor(major: InsertMajor): Promise<Major> {
-    const id = this.currentMajorId++;
-    const newMajor: Major = {
-      ...major,
-      id,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    };
-    this.majors.set(id, newMajor);
-    return newMajor;
-  }
-
-  async updateMajor(id: number, updates: Partial<Major>): Promise<Major | undefined> {
-    const major = this.majors.get(id);
-    if (!major) return undefined;
-
-    const updatedMajor = { ...major, ...updates, updatedAt: new Date().toISOString() };
-    this.majors.set(id, updatedMajor);
-    return updatedMajor;
-  }
-
-  async deleteMajor(id: number): Promise<boolean> {
-    return this.majors.delete(id);
-  }
-
-  // Class Management
-  async getAllClasses(): Promise<Class[]> {
-    return Array.from(this.classes.values());
-  }
-
-  async getClassById(id: number): Promise<Class | undefined> {
-    return this.classes.get(id);
-  }
-
-  async getClassesByMajor(majorId: number): Promise<Class[]> {
-    return Array.from(this.classes.values()).filter(cls => cls.majorId === majorId);
-  }
-
-  async getClassesByMajors(majorIds: number[]): Promise<Class[]> {
-    return Array.from(this.classes.values()).filter(cls => majorIds.includes(cls.majorId));
-  }
-
-  async createClass(cls: InsertClass & { name: string }): Promise<Class> {
-    const id = this.currentClassId++;
-    const newClass: Class = {
-      ...cls,
-      id,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    };
-    this.classes.set(id, newClass);
-    return newClass;
-  }
-
-  async updateClass(id: number, updates: Partial<Class>): Promise<Class | undefined> {
-    const cls = this.classes.get(id);
-    if (!cls) return undefined;
-
-    const updatedClass = { ...cls, ...updates, updatedAt: new Date().toISOString() };
-    this.classes.set(id, updatedClass);
-    return updatedClass;
-  }
-
-  async deleteClass(id: number): Promise<boolean> {
-    return this.classes.delete(id);
-  }
-
-  // Subject Management
-  async getAllSubjects(): Promise<Subject[]> {
-    return Array.from(this.subjects.values());
-  }
-
-  async getSubjectById(id: number): Promise<Subject | undefined> {
-    return this.subjects.get(id);
-  }
-
-  async createSubject(subject: InsertSubject): Promise<Subject> {
-    const id = this.currentSubjectId++;
-    const newSubject: Subject = {
-      ...subject,
-      id,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    };
-    this.subjects.set(id, newSubject);
-    return newSubject;
-  }
-
-  async updateSubject(id: number, updates: Partial<Subject>): Promise<Subject | undefined> {
-    const subject = this.subjects.get(id);
-    if (!subject) return undefined;
-
-    const updatedSubject = { ...subject, ...updates, updatedAt: new Date().toISOString() };
-    this.subjects.set(id, updatedSubject);
-    return updatedSubject;
-  }
-
-  async deleteSubject(id: number): Promise<boolean> {
-    return this.subjects.delete(id);
-  }
-
-  // Class Moderator Management
-  async getClassModerators(classId: number): Promise<ClassModerator[]> {
-    return Array.from(this.classModerators.values()).filter(cm => cm.classId === classId);
-  }
-
-  async getModeratorClasses(moderatorId: number): Promise<ClassModerator[]> {
-    return Array.from(this.classModerators.values()).filter(cm => cm.moderatorId === moderatorId);
-  }
-
-  async assignModerator(assignment: InsertClassModerator): Promise<ClassModerator> {
-    const id = this.currentClassModeratorId++;
-    const newAssignment: ClassModerator = {
-      ...assignment,
-      id,
-      createdAt: new Date().toISOString()
-    };
-    this.classModerators.set(id, newAssignment);
-    return newAssignment;
-  }
-
-  async removeModerator(id: number): Promise<boolean> {
-    return this.classModerators.delete(id);
-  }
-
-  // Class Subject Management
-  async getClassSubjects(classId: number): Promise<ClassSubject[]> {
-    return Array.from(this.classSubjects.values()).filter(cs => cs.classId === classId);
-  }
-
-  async getSubjectClasses(subjectId: number): Promise<ClassSubject[]> {
-    return Array.from(this.classSubjects.values()).filter(cs => cs.subjectId === subjectId);
-  }
-
-  async assignSubjectToClass(assignment: InsertClassSubject): Promise<ClassSubject> {
-    const id = this.currentClassSubjectId++;
-    const newAssignment: ClassSubject = {
-      ...assignment,
-      id,
-      createdAt: new Date().toISOString()
-    };
-    this.classSubjects.set(id, newAssignment);
-    return newAssignment;
-  }
-
-  async removeSubjectFromClass(id: number): Promise<boolean> {
-    return this.classSubjects.delete(id);
-  }
-}
-
-// MySQL Storage Implementation
-export class MySQLStorage implements IStorage {
-  private db: ReturnType<typeof drizzle>;
-
-  constructor() {
-    const dbConfig = {
-      host: process.env.DB_HOST || "localhost",
-      port: parseInt(process.env.DB_PORT || "3306"),
-      user: process.env.DB_USER || "root",
-      database: process.env.DB_NAME || "university_staff_tracker",
-      password: process.env.DB_PASSWORD || "",
-      connectionLimit: 10,
-    };
-
-    console.log('Attempting to connect to MySQL with config:', {
-      ...dbConfig,
-      password: dbConfig.password ? '***' : 'empty'
-    });
-    
-    // Create a pool for the actual database operations
-    const connection = mysql.createPool({
-      ...dbConfig,
-      waitForConnections: true,
-      queueLimit: 0,
-      enableKeepAlive: true,
-      keepAliveInitialDelay: 10000
-    });
-    
-    this.db = drizzle(connection);
-    
-    // Test the database connection
-    this.db.select().from(users).limit(1).then(() => {
-      console.log('✅ Successfully connected to database:', dbConfig.database);
-    }).catch((err) => {
-      console.error('❌ Database error:', err.message);
-      if (err.code === 'ER_NO_SUCH_TABLE') {
-        console.error('   Tables do not exist. Please run the database setup script (db.sql).');
-      } else if (err.code === 'ER_BAD_DB_ERROR') {
-        console.error(`   Database '${dbConfig.database}' does not exist. Please create it first.`);
-      } else if (err.code === 'ER_ACCESS_DENIED_ERROR') {
-        console.error('   Access denied. Please check your MySQL username and password in the .env file');
-      } else if (err.code === 'ECONNREFUSED') {
-        console.error('   Could not connect to MySQL server. Is it running?');
-      }
-    });
   }
 
   // User management
@@ -1055,8 +438,12 @@ export class MySQLStorage implements IStorage {
         password: users.password,
         role: users.role,
         departmentId: users.departmentId,
+        classId: users.classId, // ✅ ADD THIS LINE
+        workType: users.workType, // ✅ ADD THIS LINE
+        schedule: users.schedule, // ✅ ADD THIS LINE
         status: users.status,
         createdAt: users.createdAt,
+        updatedAt: users.updatedAt, // ✅ ADD THIS LINE
         department: {
           id: departments.id,
           name: departments.name,
@@ -1093,8 +480,12 @@ export class MySQLStorage implements IStorage {
           password: users.password,
           role: users.role,
           departmentId: users.departmentId,
+          classId: users.classId, // ✅ ADD THIS LINE
+          workType: users.workType, // ✅ ADD THIS LINE
+          schedule: users.schedule, // ✅ ADD THIS LINE
           status: users.status,
           createdAt: users.createdAt,
+          updatedAt: users.updatedAt, // ✅ ADD THIS LINE
           department: {
             id: departments.id,
             name: departments.name,

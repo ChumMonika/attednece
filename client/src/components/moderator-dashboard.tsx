@@ -1,3 +1,6 @@
+//This file is no longer used - content moved to main moderator-dashboard.tsx
+// Keeping for reference only
+/*
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -195,7 +198,10 @@ export default function ModeratorDashboard({ user }: ModeratorDashboardProps) {
           </div>
 
           <CardContent className="p-6">
-            {/* Table View */}
+            {/* Table View */
+          /*
+          
+          }
             <div className="overflow-x-auto">
               <table className="w-full border-collapse">
                 <thead>
@@ -214,40 +220,40 @@ export default function ModeratorDashboard({ user }: ModeratorDashboardProps) {
                       key={schedule.id}
                       className="border-b border-gray-200 hover:bg-gray-50 transition-colors"
                     >
-                      {/* Time - Visually Dominant */}
-                      <td className="px-4 py-4">
+                      {/* Time - Visually Dominant */
+                     /* <td className="px-4 py-4">
                         <div className="flex items-center text-base font-semibold text-gray-900">
                           <Clock className="w-5 h-5 mr-2 text-university-mazer" />
                           <span>{schedule.startTime} – {schedule.endTime}</span>
                         </div>
                       </td>
                       
-                      {/* Subject */}
-                      <td className="px-4 py-4">
+                      {/* Subject */
+                      /*<td className="px-4 py-4">
                         <div>
                           <div className="text-sm font-medium text-gray-900">{schedule.subject?.name || 'Unknown Subject'}</div>
                           <div className="text-xs text-gray-500 mt-0.5">{schedule.subject?.code || ''}</div>
                         </div>
                       </td>
                       
-                      {/* Teacher - Compact */}
-                      <td className="px-4 py-4">
+                      {/* Teacher - Compact */
+                      /*<td className="px-4 py-4">
                         <div>
                           <div className="text-sm font-semibold text-gray-900">{schedule.teacher?.name}</div>
                           <div className="text-xs text-gray-500">ID: {schedule.teacher?.uniqueId}</div>
                         </div>
                       </td>
                       
-                      {/* Room */}
-                      <td className="px-4 py-4">
+                      {/* Room */
+                      /*<td className="px-4 py-4">
                         <div className="flex items-center text-sm text-gray-600">
                           <MapPin className="w-4 h-4 mr-1" />
                           {schedule.room}
                         </div>
                       </td>
                       
-                      {/* Status - Color Coded */}
-                      <td className="px-4 py-4">
+                      {/* Status - Color Coded */
+                     /* <td className="px-4 py-4">
                         {schedule.attendance?.status === "present" && (
                           <span className="inline-flex items-center px-3 py-1 bg-green-100 text-green-800 text-sm rounded-full font-medium">
                             <Check className="w-3 h-3 mr-1" />
@@ -278,8 +284,8 @@ export default function ModeratorDashboard({ user }: ModeratorDashboardProps) {
                         )}
                       </td>
                       
-                      {/* Action */}
-                      <td className="px-4 py-4">
+                      {/* Action */
+                     /* <td className="px-4 py-4">
                         {!schedule.attendance ? (
                           <Button
                             size="sm"
@@ -311,8 +317,8 @@ export default function ModeratorDashboard({ user }: ModeratorDashboardProps) {
                 <div className="text-sm text-gray-600">
                   <span className="font-medium">Summary:</span> {presentCount} Present, {pendingCount} Pending, {onLeaveCount} On Leave
                 </div>
-                {/* Removed Generate Daily Report button */}
-              </div>
+                {/* Removed Generate Daily Report button */
+             /* </div>
             </div>
           </CardContent>
         </Card>
@@ -321,3 +327,4 @@ export default function ModeratorDashboard({ user }: ModeratorDashboardProps) {
   </div>
   );
 }
+*/

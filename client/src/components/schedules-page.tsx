@@ -54,133 +54,146 @@ export default function SchedulesPage() {
   const [conflictWarnings, setConflictWarnings] = useState<string[]>([]);
 
   const { data: schedules, isLoading } = useQuery<Schedule[]>({
-    queryKey: ["/api/schedules"],
-  });
+  queryKey: ["/api/schedules"],
+});
 
-  const { data: classes } = useQuery<Class[]>({
-    queryKey: ["/api/classes"],
-  });
+const { data: allClasses } = useQuery<Class[]>({
+  queryKey: ["/api/classes"],
+});
 
-  const { data: subjects } = useQuery<Subject[]>({
-    queryKey: ["/api/subjects"],
-  });
+// ✅ Filter for active classes only
+const activeClasses = useMemo(() => {
+  return allClasses?.filter(cls => cls.isActive === 1) || [];
+}, [allClasses]);
 
-  const { data: users } = useQuery<User[]>({
-    queryKey: ["/api/users"],
-  });
+// ✅ Use activeClasses throughout the component
+const classes = activeClasses;
 
-  const { data: majors } = useQuery<Major[]>({
-    queryKey: ["/api/majors"],
-  });
+const { data: subjects } = useQuery<Subject[]>({
+  queryKey: ["/api/subjects"],
+});
 
-  const teachers = users?.filter(u => u.role === "teacher") || [];
+const { data: users } = useQuery<User[]>({
+  queryKey: ["/api/users"],
+});
 
-  // Hierarchical grouping: Major → Year/Semester → Class → Schedules
-  const hierarchicalSchedules = useMemo(() => {
-    if (!schedules || !classes || !majors) return { hierarchy: [], totalItems: 0, totalPages: 0 };
+const { data: majors } = useQuery<Major[]>({
+  queryKey: ["/api/majors"],
+});
 
-    // Filter schedules
-    let filtered = [...schedules];
-    
-    if (filterClass !== "all") {
-      filtered = filtered.filter(s => s.classId === parseInt(filterClass));
-    } else if (filterMajor !== "all") {
-      const majorClasses = classes.filter(c => c.majorId === parseInt(filterMajor));
-      const classIds = majorClasses.map(c => c.id);
-      filtered = filtered.filter(s => classIds.includes(s.classId));
+const teachers = users?.filter(u => u.role === "teacher") || [];
+
+// Hierarchical grouping: Major → Year/Semester → Class → Schedules
+const hierarchicalSchedules = useMemo(() => {
+  if (!schedules || !classes || !majors) return { hierarchy: [], totalItems: 0, totalPages: 0 };
+
+  // Filter schedules
+  let filtered = schedules;
+  if (filterMajor !== "all") {
+    const classIdsForMajor = classes.filter(c => c.majorId === parseInt(filterMajor)).map(c => c.id);
+    filtered = filtered.filter(s => classIdsForMajor.includes(s.classId));
+  }
+  if (filterClass !== "all") {
+    filtered = filtered.filter(s => s.classId === parseInt(filterClass));   
+  }
+
+  // ❌ REMOVE THIS LINE (it was causing the duplicate):
+  // const activeClasses = useMemo(() => {
+  //   return allClasses?.filter(cls => cls.isActive === 1) || [];}, [allClasses]);
+
+  // Group by major → year/semester → class
+  const hierarchy: any[] = [];
+  
+  // Group schedules by class first
+  const schedulesByClass = filtered.reduce((acc, schedule) => {
+    if (!acc[schedule.classId]) acc[schedule.classId] = [];
+    acc[schedule.classId].push(schedule);
+    return acc;
+  }, {} as Record<number, Schedule[]>);
+
+  // Build hierarchy
+  Object.entries(schedulesByClass).forEach(([classIdStr, classSchedules]) => {
+    const classId = parseInt(classIdStr);
+    const classInfo = classes.find(c => c.id === classId);
+    if (!classInfo) return;
+
+    const major = majors.find(m => m.id === classInfo.majorId);
+    const majorShort = major?.shortName || 'Unknown';
+    const majorName = major?.name || 'Unknown';
+    const year = classInfo.year;
+    const semester = classInfo.semester;
+    const group = classInfo.group || '';
+    const classLabel = classInfo.classLabel || `${majorShort} Y${year}S${semester} ${group}`;
+    const subjectCount = classSchedules.length;
+
+    // Sort schedules by day and time
+    const sortedSchedules = classSchedules.sort((a, b) => {
+      const dayOrder = { Monday: 1, Tuesday: 2, Wednesday: 3, Thursday: 4, Friday: 5, Saturday: 6, Sunday: 7 };
+      const dayDiff = (dayOrder[a.day as keyof typeof dayOrder] || 0) - (dayOrder[b.day as keyof typeof dayOrder] || 0);
+      if (dayDiff !== 0) return dayDiff;
+      return a.startTime.localeCompare(b.startTime);
+    });
+
+    // Find or create major group
+    let majorGroup = hierarchy.find(h => h.majorId === classInfo.majorId);
+    if (!majorGroup) {
+      majorGroup = {
+        majorId: classInfo.majorId,
+        majorName,
+        majorShort,
+        yearSemesterGroups: []
+      };
+      hierarchy.push(majorGroup);
     }
 
-    // Group by major → year/semester → class
-    const hierarchy: any[] = [];
-    
-    // Group schedules by class first
-    const schedulesByClass = filtered.reduce((acc, schedule) => {
-      if (!acc[schedule.classId]) acc[schedule.classId] = [];
-      acc[schedule.classId].push(schedule);
-      return acc;
-    }, {} as Record<number, Schedule[]>);
+    // Find or create year/semester group
+    const yearSemKey = `Y${year}S${semester}`;
+    let yearSemGroup = majorGroup.yearSemesterGroups.find((g: any) => g.key === yearSemKey);
+    if (!yearSemGroup) {
+      yearSemGroup = {
+        key: yearSemKey,
+        year,
+        semester,
+        label: `Year ${year} – Semester ${semester}`,
+        classes: []
+      };
+      majorGroup.yearSemesterGroups.push(yearSemGroup);
+    }
 
-    // Build hierarchy
-    Object.entries(schedulesByClass).forEach(([classIdStr, classSchedules]) => {
-      const classId = parseInt(classIdStr);
-      const classInfo = classes.find(c => c.id === classId);
-      if (!classInfo) return;
-
-      const major = majors.find(m => m.id === classInfo.majorId);
-      const majorShort = major?.shortName || 'Unknown';
-      const majorName = major?.name || 'Unknown';
-      const year = classInfo.year;
-      const semester = classInfo.semester;
-      const group = classInfo.group || '';
-      const classLabel = classInfo.classLabel || `${majorShort} Y${year}S${semester} ${group}`;
-      const subjectCount = classSchedules.length;
-
-      // Sort schedules by day and time
-      const sortedSchedules = classSchedules.sort((a, b) => {
-        const dayOrder = { Monday: 1, Tuesday: 2, Wednesday: 3, Thursday: 4, Friday: 5, Saturday: 6, Sunday: 7 };
-        const dayDiff = (dayOrder[a.day as keyof typeof dayOrder] || 0) - (dayOrder[b.day as keyof typeof dayOrder] || 0);
-        if (dayDiff !== 0) return dayDiff;
-        return a.startTime.localeCompare(b.startTime);
-      });
-
-      // Find or create major group
-      let majorGroup = hierarchy.find(h => h.majorId === classInfo.majorId);
-      if (!majorGroup) {
-        majorGroup = {
-          majorId: classInfo.majorId,
-          majorName,
-          majorShort,
-          yearSemesterGroups: []
-        };
-        hierarchy.push(majorGroup);
-      }
-
-      // Find or create year/semester group
-      const yearSemKey = `Y${year}S${semester}`;
-      let yearSemGroup = majorGroup.yearSemesterGroups.find((g: any) => g.key === yearSemKey);
-      if (!yearSemGroup) {
-        yearSemGroup = {
-          key: yearSemKey,
-          year,
-          semester,
-          label: `Year ${year} – Semester ${semester}`,
-          classes: []
-        };
-        majorGroup.yearSemesterGroups.push(yearSemGroup);
-      }
-
-      // Add class to year/semester group
-      yearSemGroup.classes.push({
-        classId,
-        classInfo,
-        classLabel,
-        subjectCount,
-        displayHeader: `${classLabel} — ${subjectCount} Subject${subjectCount !== 1 ? 's' : ''}`,
-        schedules: sortedSchedules
-      });
+    // Add class to year/semester group
+    yearSemGroup.classes.push({
+      classId,
+      classInfo,
+      classLabel,
+      subjectCount,
+      displayHeader: `${classLabel} — ${subjectCount} Subject${subjectCount !== 1 ? 's' : ''}`,
+      schedules: sortedSchedules
     });
+  });
 
-    // Sort hierarchy
-    hierarchy.sort((a, b) => a.majorShort.localeCompare(b.majorShort));
-    hierarchy.forEach(major => {
-      major.yearSemesterGroups.sort((a: any, b: any) => {
-        if (a.year !== b.year) return a.year - b.year;
-        return a.semester - b.semester;
-      });
-      major.yearSemesterGroups.forEach((ys: any) => {
-        ys.classes.sort((a: any, b: any) => a.classLabel.localeCompare(b.classLabel));
-      });
+  // Sort hierarchy
+  hierarchy.sort((a, b) => a.majorShort.localeCompare(b.majorShort));
+  hierarchy.forEach(major => {
+    major.yearSemesterGroups.sort((a: any, b: any) => {
+      if (a.year !== b.year) return a.year - b.year;
+      return a.semester - b.semester;
     });
+    major.yearSemesterGroups.forEach((ys: any) => {
+      ys.classes.sort((a: any, b: any) => a.classLabel.localeCompare(b.classLabel));
+    });
+  });
 
-    // Count total number of classes (not schedules)
-    const totalClasses = Object.keys(schedulesByClass).length;
-    
-    return {
-      hierarchy,
-      totalItems: totalClasses,
-      totalPages: Math.ceil(totalClasses / itemsPerPage)
-    };
-  }, [schedules, classes, majors, filterMajor, filterClass, currentPage]);
+  // Count total number of classes (not schedules)
+  const totalClasses = Object.keys(schedulesByClass).length;
+  
+  return {
+    hierarchy,
+    totalItems: totalClasses,
+    totalPages: Math.ceil(totalClasses / itemsPerPage)
+  };
+}, [schedules, classes, majors, filterMajor, filterClass, currentPage, itemsPerPage]);
+
+
 
   const toggleClassExpanded = (classId: number) => {
     const newExpanded = new Set(expandedClasses);

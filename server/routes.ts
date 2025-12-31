@@ -262,7 +262,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             userId: updatedRequest.userId,
             date: dateStr,
             status: 'leave',
-            isLate: false,
+            isLate: 0,
             markedAt: new Date(),
             markedBy: currentUserId,
           });
@@ -313,201 +313,270 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // HEAD ATTENDANCE ENDPOINT - CORRECTED LOGIC
   app.get("/api/head/attendance", requireAuth, async (req, res) => {
-    try {
-      const userRole = (req.session as any).userRole;
-      const currentUserId = (req.session as any).userId;
+  try {
+    const userRole = (req.session as any).userRole;
+    const currentUserId = (req.session as any).userId;
+    
+    if (!['head', 'admin'].includes(userRole)) {
+      return res.status(403).json({ message: "Forbidden" });
+    }
+    
+    const currentUser = await storage.getUser(currentUserId);
+    if (userRole === 'head' && !currentUser?.departmentId) {
+      return res.status(400).json({ message: "User department not found" });
+    }
+
+    const { startDate, endDate, role: qRole, class: qClass, status: qStatus } = req.query as any;
+    const start = startDate ? new Date(startDate) : new Date("2000-01-01");
+    const end = endDate ? new Date(endDate) : new Date("2099-12-31");
+
+    const allUsers = await storage.getAllUsers();
+    const allAttendance = await storage.getAllAttendance();
+    const allLeaveRequests = await storage.getLeaveRequests();
+    const approvedLeaves = allLeaveRequests.filter(lr => lr.status === 'approved');
+    const allClasses = await storage.getAllClasses();
+    const allMajors = await storage.getAllMajors();
+    const allSchedules = await storage.getAllSchedules();
+
+    // ✅ Filter for ACTIVE classes only
+    const activeClasses = allClasses.filter(cls => cls.isActive === 1);
+    const activeClassIds = activeClasses.map(cls => cls.id);
+
+    const majorMap = new Map(allMajors.map(m => [m.id, m]));
+    const classById = new Map(activeClasses.map(cls => [cls.id, cls]));
+
+    const buildClassLabel = (cls: any) => {
+      if (!cls) return null;
+      const major = majorMap.get(cls.majorId);
+      const majorShort = major?.shortName || major?.name || 'Unknown';
+      return `${majorShort} Y${cls.year}S${cls.semester}${cls.group ? ' ' + cls.group : ''}`;
+    };
+
+    const departmentMajorIds = userRole === 'admin' 
+      ? allMajors.map(m => m.id)
+      : allMajors.filter(m => m.departmentId === currentUser.departmentId).map(m => m.id);
+    
+    // ✅ Only active classes
+    const departmentClassIds = activeClasses
+      .filter(c => departmentMajorIds.includes(c.majorId))
+      .map(c => c.id);
+
+    // ✅ Filter schedules for active classes
+    const activeSchedules = allSchedules.filter(s => activeClassIds.includes(s.classId));
+
+    // Teacher attendance
+    const teacherAttendance = allAttendance.filter(a => {
+      const u = allUsers.find(uu => uu.id === a.userId);
+      if (!u || u.role !== 'teacher') return false;
       
-      if (!['head', 'admin'].includes(userRole)) {
-        return res.status(403).json({ message: "Forbidden" });
-      }
+      const teacherSchedules = activeSchedules.filter(s => s.teacherId === a.userId);
+      const hasDeptSchedule = teacherSchedules.some(s => departmentClassIds.includes(s.classId));
       
-      const currentUser = await storage.getUser(currentUserId);
-      if (userRole === 'head' && !currentUser?.departmentId) {
-        return res.status(400).json({ message: "User department not found" });
-      }
+      return hasDeptSchedule;
+    });
 
-      // Parse filters
-      const { startDate, endDate, role: qRole, class: qClass, status: qStatus } = req.query as any;
-      const start = startDate ? new Date(startDate) : new Date("2000-01-01");
-      const end = endDate ? new Date(endDate) : new Date("2099-12-31");
+    const teacherEntries = teacherAttendance.map(a => {
+      const user = allUsers.find(u => u.id === a.userId);
+      const teacherSchedules = activeSchedules.filter(s => 
+        s.teacherId === a.userId && 
+        departmentClassIds.includes(s.classId)
+      );
+      
+      const classSchedule = teacherSchedules.length > 0 ? teacherSchedules[0] : null;
+      const classLabel = classSchedule ? buildClassLabel(classById.get(classSchedule.classId)) : null;
 
-      // Load all data
-      const allUsers = await storage.getAllUsers();
-      const allAttendance = await storage.getAllAttendance();
-      const allLeaveRequests = await storage.getLeaveRequests();
-      const approvedLeaves = allLeaveRequests.filter(lr => lr.status === 'approved');
-      const allClasses = await storage.getAllClasses();
-      const allMajors = await storage.getAllMajors();
-      const allSchedules = await storage.getAllSchedules();
-
-      // Build maps
-      const majorMap = new Map(allMajors.map(m => [m.id, m]));
-      const classById = new Map(allClasses.map(cls => [cls.id, cls]));
-
-      const buildClassLabel = (cls: any) => {
-        if (!cls) return null;
-        const major = majorMap.get(cls.majorId);
-        const majorShort = major?.shortName || major?.name || 'Unknown';
-        return `${majorShort} Y${cls.year}S${cls.semester}${cls.group ? ' ' + cls.group : ''}`;
+      return {
+        id: a.id,
+        userId: a.userId,
+        date: a.date,
+        status: a.status,
+        markedBy: a.markedBy,
+        markedAt: a.markedAt,
+        user,
+        classId: classSchedule?.classId || null,
+        classLabel,
+        schedule: classSchedule,
+        scheduleId: classSchedule?.id || null
       };
+    });
 
-      // Determine department classes (via major->department)
-      const departmentMajorIds = userRole === 'admin' 
-        ? allMajors.map(m => m.id)
-        : allMajors.filter(m => m.departmentId === currentUser.departmentId).map(m => m.id);
-      const departmentClassIds = allClasses.filter(c => departmentMajorIds.includes(c.majorId)).map(c => c.id);
+    // Staff attendance
+    const departmentStaff = userRole === 'admin'
+      ? allUsers.filter(u => u.role === 'staff')
+      : allUsers.filter(u => u.role === 'staff' && u.departmentId === currentUser.departmentId);
 
-      console.log('[HEAD ATTENDANCE] Filters:', { startDate, endDate, qRole, qClass, qStatus });
-      console.log('[HEAD ATTENDANCE] Department major IDs:', departmentMajorIds);
-      console.log('[HEAD ATTENDANCE] Department class IDs:', departmentClassIds);
-      console.log('[HEAD ATTENDANCE] Total classes in system:', allClasses.length);
-      console.log('[HEAD ATTENDANCE] Total schedules in system:', allSchedules.length);
+    const staffAttendance = allAttendance.filter(a => {
+      const u = allUsers.find(uu => uu.id === a.userId);
+      if (!u || u.role !== 'staff') return false;
+      if (!departmentStaff.some(ds => ds.id === u.id)) return false;
+      if (startDate && endDate) {
+        return new Date(a.date) >= start && new Date(a.date) <= end;
+      }
+      return true;
+    });
 
-      // TEACHER ATTENDANCE - Include all teachers with attendance records in department classes
-      const teacherAttendance = allAttendance.filter(a => {
-        const u = allUsers.find(uu => uu.id === a.userId);
-        if (!u || u.role !== 'teacher') return false;
-        
-        console.log(`[HEAD ATT] Checking teacher ${u.id} (${u.name}):`, { role: u.role, date: a.date });
-        
-        // Include teacher if they have a schedule for a department class
-        const teacherSchedules = allSchedules.filter(s => s.teacherId === a.userId);
-        const hasDeptSchedule = teacherSchedules.some(s => departmentClassIds.includes(s.classId));
-        
-        console.log(`[HEAD ATT]   Has dept schedule: ${hasDeptSchedule}, Total schedules: ${teacherSchedules.length}`);
-        
-        if (hasDeptSchedule) {
-          console.log(`[HEAD ATT]   Including teacher (has dept schedule)`);
-          return true;
-        }
-        
-        console.log(`[HEAD ATT]   Excluding teacher (no dept schedule)`);
-        return false;
-      });
+    const staffLeaves = approvedLeaves.filter(l => {
+      const u = allUsers.find(uu => uu.id === l.userId);
+      if (!u || u.role !== 'staff') return false;
+      if (!departmentStaff.some(ds => ds.id === u.id)) return false;
+      if (startDate && endDate) {
+        return new Date(l.startDate) <= end && new Date(l.endDate) >= start;
+      }
+      return true;
+    });
 
-      const teacherEntries = teacherAttendance.map(a => {
-        const user = allUsers.find(u => u.id === a.userId);
-        const teacherSchedules = allSchedules.filter(s => s.teacherId === a.userId && departmentClassIds.includes(s.classId));
-        
-        // For teacher attendance, show ANY class they teach in this department
-        // (not limited to specific day of week, since we want to show which class the attendance applies to)
-        const classSchedule = teacherSchedules.length > 0 ? teacherSchedules[0] : null;
-        const classLabel = classSchedule ? buildClassLabel(classById.get(classSchedule.classId)) : null;
+    const attendance: any[] = [];
+    attendance.push(...teacherEntries);
+    attendance.push(...staffAttendance.map(a => {
+      const user = allUsers.find(u => u.id === a.userId);
+      return {
+        ...a,
+        user,
+        classId: null,
+        classLabel: null
+      };
+    }));
 
-        return {
-          id: a.id,
-          userId: a.userId,
-          date: a.date,
-          status: a.status,
-          markedBy: a.markedBy,
-          markedAt: a.markedAt,
-          user,
-          classId: classSchedule?.classId || null,
-          classLabel,
-          schedule: classSchedule,
-          scheduleId: classSchedule?.id || null
-        };
-      });
-
-      // STAFF ATTENDANCE - Filter by departmentId
-      const departmentStaff = userRole === 'admin'
-        ? allUsers.filter(u => u.role === 'staff')
-        : allUsers.filter(u => u.role === 'staff' && u.departmentId === currentUser.departmentId);
-
-      const staffAttendance = allAttendance.filter(a => {
-        const u = allUsers.find(uu => uu.id === a.userId);
-        if (!u || u.role !== 'staff') return false;
-        if (!departmentStaff.some(ds => ds.id === u.id)) return false;
-        // Only filter by date range if user provided dates
-        if (startDate && endDate) {
-          return new Date(a.date) >= start && new Date(a.date) <= end;
-        }
-        return true; // Include all staff attendance if no date filter
-      });
-
-      // Staff approved leaves
-      const staffLeaves = approvedLeaves.filter(l => {
-        const u = allUsers.find(uu => uu.id === l.userId);
-        if (!u || u.role !== 'staff') return false;
-        if (!departmentStaff.some(ds => ds.id === u.id)) return false;
-        // Only filter by date range if user provided dates
-        if (startDate && endDate) {
-          return new Date(l.startDate) <= end && new Date(l.endDate) >= start;
-        }
-        return true; // Include all leaves if no date filter
-      });
-
-      console.log('[HEAD ATTENDANCE] Teacher attendance records:', teacherEntries.length);
-      console.log('[HEAD ATTENDANCE] Staff attendance records:', staffAttendance.length);
-      console.log('[HEAD ATTENDANCE] Department staff:', departmentStaff.length);
-      console.log('[HEAD ATTENDANCE] Staff leaves:', staffLeaves.length);
-
-      // Combine all attendance
-      const attendance: any[] = [];
-      attendance.push(...teacherEntries);
-      attendance.push(...staffAttendance.map(a => {
-        const user = allUsers.find(u => u.id === a.userId);
-        return {
-          ...a,
+    for (const leave of staffLeaves) {
+      const dateStr = leave.startDate;
+      if (startDate && endDate && (new Date(dateStr) < start || new Date(dateStr) > end)) continue;
+      const hasExisting = attendance.find(a => a.userId === leave.userId && a.date === dateStr);
+      if (!hasExisting) {
+        const user = allUsers.find(u => u.id === leave.userId);
+        attendance.push({
+          id: `leave-${leave.id}`,
+          userId: leave.userId,
+          date: dateStr,
+          status: 'leave',
+          markedBy: leave.respondedBy,
+          markedAt: leave.respondedAt || leave.submittedAt,
           user,
           classId: null,
           classLabel: null
-        };
-      }));
+        });
+      }
+    }
 
-      // Add staff leaves without attendance
-      for (const leave of staffLeaves) {
-        const dateStr = leave.startDate;
-        // Only filter by date range if user provided dates
-        if (startDate && endDate && (new Date(dateStr) < start || new Date(dateStr) > end)) continue;
-        const hasExisting = attendance.find(a => a.userId === leave.userId && a.date === dateStr);
-        if (!hasExisting) {
-          const user = allUsers.find(u => u.id === leave.userId);
-          attendance.push({
-            id: `leave-${leave.id}`,
-            userId: leave.userId,
-            date: dateStr,
-            status: 'leave',
-            markedBy: leave.respondedBy,
-            markedAt: leave.respondedAt || leave.submittedAt,
-            user,
-            classId: null,
-            classLabel: null
-          });
+    // Apply filters
+    const filtered = attendance.filter(rec => {
+      if (startDate && endDate) {
+        const recDate = new Date(rec.date);
+        if (recDate < start || recDate > end) return false;
+      }
+      if (qRole && qRole !== 'all' && rec.user?.role !== qRole) return false;
+      if (qStatus && qStatus !== 'all' && rec.status !== qStatus) return false;
+      if (qClass && qClass !== 'all') {
+        if (typeof qClass === 'string' && qClass.match(/^\d+$/)) {
+          if (rec.classId !== parseInt(qClass)) return false;
+        } else {
+          if (rec.classLabel !== qClass) return false;
         }
       }
+      return true;
+    });
 
-      // Apply filters
-      const filtered = attendance.filter(rec => {
-        // Only filter by date range if user provided dates
-        if (startDate && endDate) {
-          const recDate = new Date(rec.date);
-          if (recDate < start || recDate > end) return false;
-        }
-        if (qRole && qRole !== 'all' && rec.user?.role !== qRole) return false;
-        if (qStatus && qStatus !== 'all' && rec.status !== qStatus) return false;
-        if (qClass && qClass !== 'all') {
-          if (typeof qClass === 'string' && qClass.match(/^\d+$/)) {
-            if (rec.classId !== parseInt(qClass)) return false;
-          } else {
-            if (rec.classLabel !== qClass) return false;
-          }
-        }
-        return true;
-      });
+    filtered.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime() || (a.user?.name || '').localeCompare(b.user?.name || ''));
 
-      console.log('[HEAD ATTENDANCE] Total attendance before filter:', attendance.length);
-      console.log('[HEAD ATTENDANCE] Total attendance after filter:', filtered.length);
-      console.log('[HEAD ATTENDANCE] Sample filtered records (first 3):', filtered.slice(0, 3).map(r => ({ id: r.id, userId: r.userId, date: r.date, status: r.status, classLabel: r.classLabel })));
+    res.json(filtered);
+  } catch (error) {
+    console.error("Head attendance endpoint error:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+});
 
-      filtered.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime() || (a.user?.name || '').localeCompare(b.user?.name || ''));
-
-      res.json(filtered);
-    } catch (error) {
-      console.error("Head attendance endpoint error:", error);
-      res.status(500).json({ message: "Server error" });
+  app.get("/api/my-class-status", requireAuth, async (req, res) => {
+  try {
+    const userId = (req.session as any).userId;
+    const userRole = (req.session as any).userRole;
+    
+    if (userRole !== 'class_moderator' && userRole !== 'moderator') {
+      return res.status(403).json({ message: "Only class moderators can check class status" });
     }
-  });
+    
+    const user = await storage.getUser(userId);
+    
+    if (!user?.classId) {
+      return res.json({ 
+        hasClass: false, 
+        isActive: false,
+        message: "No class assigned" 
+      });
+    }
+    
+    const classObj = await storage.getClassById(user.classId);
+    
+    if (!classObj) {
+      return res.json({ 
+        hasClass: false, 
+        isActive: false,
+        message: "Class not found" 
+      });
+    }
+    
+    return res.json({ 
+      hasClass: true, 
+      isActive: classObj.isActive === 1,
+      classInfo: {
+        id: classObj.id,
+        name: classObj.name,
+        isActive: classObj.isActive
+      },
+      message: classObj.isActive === 1 
+        ? "Class is active" 
+        : "Class is inactive - you cannot mark attendance"
+    });
+  } catch (error) {
+    console.error("Check class status error:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+  app.get("/api/classes/active", requireAuth, async (req, res) => {
+  try {
+    const userRole = (req.session as any).userRole;
+    
+    if (!['admin', 'head'].includes(userRole)) {
+      return res.status(403).json({ message: "Admin or Head access required" });
+    }
+
+    const allClasses = await storage.getAllClasses();
+    
+    // ✅ Return only active classes
+    const activeClasses = allClasses.filter(cls => cls.isActive === 1);
+
+    // Get majors to build full names
+    const majors = await storage.getAllMajors();
+    const majorMap = new Map(majors.map(m => [m.id, m]));
+
+    const classesWithFullName = activeClasses.map(cls => {
+      const major = majorMap.get(cls.majorId);
+      const majorShort = major?.shortName || major?.name || 'Unknown';
+      const majorFull = major?.name || 'Unknown';
+      const groupStr = (cls as any).group ? ` ${(cls as any).group}` : '';
+
+      const classLabel = `${majorShort} Y${cls.year}S${cls.semester}${groupStr}`;
+      const yearText = `Year ${cls.year}`;
+      const semesterText = `Semester ${cls.semester}`;
+      const groupText = (cls as any).group || '';
+      const displayClassName = `${majorFull} - ${yearText} - ${semesterText}${groupText ? ' - Group ' + groupText : ''}`;
+
+      return {
+        ...cls,
+        classLabel,
+        fullClassName: classLabel,
+        displayClassName,
+        majorShort
+      };
+    });
+
+    res.json(classesWithFullName);
+  } catch (error) {
+    console.error("Get active classes error:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+
 
   app.get("/api/department-summary", requireAuth, async (req, res) => {
     try {
@@ -879,107 +948,126 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Schedule management routes
   app.get("/api/schedules", requireAuth, async (req, res) => {
-    try {
-      console.log("=== SCHEDULE GET DEBUG ===");
-      console.log("User role:", (req.session as any).userRole);
-      console.log("User ID:", (req.session as any).userId);
-      console.log("Query params:", req.query);
-      
-      const userRole = (req.session as any).userRole;
-      const userId = (req.session as any).userId;
-      
-      if (!['head', 'admin', 'mazer', 'class_moderator', 'moderator'].includes(userRole)) {
-        console.log("Access denied: User role not allowed");
-        return res.status(403).json({ message: "Forbidden - Admin, Head, or Moderator access required" });
-      }
-
-      const { day, major } = req.query;
-      let schedules;
-
-      if (userRole === 'class_moderator' || userRole === 'moderator') {
-        const assignedClasses = await storage.getClassModeratorsByUser(userId);
-        const classIds = assignedClasses.map(cm => cm.classId);
-        
-        console.log("Moderator assigned class IDs:", classIds);
-        
-        if (classIds.length === 0) {
-          return res.json([]);
-        }
-        
-        const allSchedules = await storage.getAllSchedules();
-        schedules = allSchedules.filter(schedule => classIds.includes(schedule.classId));
-        
-        if (day) {
-          schedules = schedules.filter(schedule => schedule.dayOfWeek === day);
-        }
-      } else {
-        if (day) {
-          schedules = await storage.getSchedulesByDay(day as string);
-        } else if (major) {
-          schedules = await storage.getSchedulesByMajor(major as string);
-        } else {
-          schedules = await storage.getAllSchedules();
-        }
-      }
-
-      console.log("Found schedules:", schedules.length);
-
-      const classes = await storage.getAllClasses();
-      const majors = await storage.getAllMajors();
-      const subjects = await storage.getAllSubjects();
-      const classMap = new Map(classes.map(c => [c.id, c]));
-      const majorMap = new Map(majors.map(m => [m.id, m]));
-      const subjectMap = new Map(subjects.map(s => [s.id, s]));
-
-      const schedulesWithTeachers = await Promise.all(
-        schedules.map(async (schedule) => {
-          const teacher = await storage.getUser(schedule.teacherId);
-          const classInfo = classMap.get(schedule.classId);
-          const subject = subjectMap.get(schedule.subjectId);
-          
-          let classLabel = 'Unknown Class';
-          let fullClassName = 'Unknown Class';
-          let displayClassName = 'Unknown Class';
-          let majorShort = 'Unknown';
-          
-          if (classInfo) {
-            const major = majorMap.get(classInfo.majorId);
-            majorShort = major?.shortName || major?.name || 'Unknown';
-            const majorFull = major?.name || 'Unknown';
-            const groupStr = (classInfo as any).group ? ` ${(classInfo as any).group}` : '';
-            
-            classLabel = `${majorShort} Y${classInfo.year}S${classInfo.semester}${groupStr}`;
-            fullClassName = classLabel;
-            
-            const yearText = `Year ${classInfo.year}`;
-            const semesterText = `Semester ${classInfo.semester}`;
-            const groupText = (classInfo as any).group || '';
-            displayClassName = `${majorFull} - ${yearText} - ${semesterText}${groupText ? ' - Group ' + groupText : ''}`;
-          }
-          
-          return { 
-            ...schedule, 
-            teacher,
-            subject,
-            classLabel,
-            fullClassName,
-            displayClassName,
-            majorShort,
-            classInfo
-          };
-        })
-      );
-
-      console.log("=== END SCHEDULE GET DEBUG ===");
-      res.json(schedulesWithTeachers);
-    } catch (error) {
-      console.error("=== SCHEDULE GET ERROR ===");
-      console.error("Error:", error);
-      console.error("Error message:", (error as Error).message);
-      console.error("=== END SCHEDULE GET ERROR ===");
-      res.status(500).json({ message: "Server error" });
+  try {
+    console.log("=== SCHEDULE GET DEBUG ===");
+    console.log("User role:", (req.session as any).userRole);
+    console.log("User ID:", (req.session as any).userId);
+    console.log("Query params:", req.query);
+    
+    const userRole = (req.session as any).userRole;
+    const userId = (req.session as any).userId;
+    
+    if (!['head', 'admin', 'mazer', 'class_moderator', 'moderator'].includes(userRole)) {
+      console.log("Access denied: User role not allowed");
+      return res.status(403).json({ message: "Forbidden - Admin, Head, or Moderator access required" });
     }
-  });
+
+    const { day, major } = req.query;
+    let schedules;
+
+    // ✅ LOAD ALL CLASSES FIRST (to check isActive)
+    const allClasses = await storage.getAllClasses();
+    const activeClassIds = allClasses
+      .filter(cls => cls.isActive === 1) // Only active classes
+      .map(cls => cls.id);
+
+    if (userRole === 'class_moderator' || userRole === 'moderator') {
+      const assignedClasses = await storage.getClassModeratorsByUser(userId);
+      const classIds = assignedClasses.map(cm => cm.classId);
+      
+      console.log("Moderator assigned class IDs:", classIds);
+      
+      if (classIds.length === 0) {
+        return res.json([]);
+      }
+      
+      const allSchedules = await storage.getAllSchedules();
+      
+      // ✅ FILTER: Only schedules from assigned classes that are ACTIVE
+      schedules = allSchedules.filter(schedule => 
+        classIds.includes(schedule.classId) && 
+        activeClassIds.includes(schedule.classId) // ✅ ADD THIS CHECK
+      );
+      
+      if (day) {
+        schedules = schedules.filter(schedule => schedule.day === day);
+      }
+    } else {
+      // For admin/head: Also filter by active classes
+      if (day) {
+        schedules = await storage.getSchedulesByDay(day as string);
+      } else if (major) {
+        schedules = await storage.getSchedulesByMajor(major as string);
+      } else {
+        schedules = await storage.getAllSchedules();
+      }
+      
+      // ✅ FILTER: Only active classes for admin/head too
+      schedules = schedules.filter(schedule => 
+        activeClassIds.includes(schedule.classId)
+      );
+    }
+
+    console.log("Found schedules:", schedules.length);
+    console.log("Active class IDs:", activeClassIds);
+
+    // ... rest of the code (enriching with teacher/class/subject data)
+    const classes = await storage.getAllClasses();
+    const majors = await storage.getAllMajors();
+    const subjects = await storage.getAllSubjects();
+    const classMap = new Map(classes.map(c => [c.id, c]));
+    const majorMap = new Map(majors.map(m => [m.id, m]));
+    const subjectMap = new Map(subjects.map(s => [s.id, s]));
+
+    const schedulesWithTeachers = await Promise.all(
+      schedules.map(async (schedule) => {
+        const teacher = await storage.getUser(schedule.teacherId);
+        const classInfo = classMap.get(schedule.classId);
+        const subject = subjectMap.get(schedule.subjectId);
+        
+        let classLabel = 'Unknown Class';
+        let fullClassName = 'Unknown Class';
+        let displayClassName = 'Unknown Class';
+        let majorShort = 'Unknown';
+        
+        if (classInfo) {
+          const major = majorMap.get(classInfo.majorId);
+          majorShort = major?.shortName || major?.name || 'Unknown';
+          const majorFull = major?.name || 'Unknown';
+          const groupStr = (classInfo as any).group ? ` ${(classInfo as any).group}` : '';
+          
+          classLabel = `${majorShort} Y${classInfo.year}S${classInfo.semester}${groupStr}`;
+          fullClassName = classLabel;
+          
+          const yearText = `Year ${classInfo.year}`;
+          const semesterText = `Semester ${classInfo.semester}`;
+          const groupText = (classInfo as any).group || '';
+          displayClassName = `${majorFull} - ${yearText} - ${semesterText}${groupText ? ' - Group ' + groupText : ''}`;
+        }
+        
+        return { 
+          ...schedule, 
+          teacher,
+          subject,
+          classLabel,
+          fullClassName,
+          displayClassName,
+          majorShort,
+          classInfo
+        };
+      })
+    );
+
+    console.log("=== END SCHEDULE GET DEBUG ===");
+    res.json(schedulesWithTeachers);
+  } catch (error) {
+    console.error("=== SCHEDULE GET ERROR ===");
+    console.error("Error:", error);
+    console.error("Error message:", (error as Error).message);
+    console.error("=== END SCHEDULE GET ERROR ===");
+    res.status(500).json({ message: "Server error" });
+  }
+});
 
   app.post("/api/schedules", requireAuth, async (req, res) => {
     try {
@@ -1153,52 +1241,62 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.get("/api/my-schedules", requireAuth, async (req, res) => {
-    try {
-      const session = req.session as any;
-      const userId = session.userId;
-      const userRole = session.userRole;
+  try {
+    const session = req.session as any;
+    const userId = session.userId;
+    const userRole = session.userRole;
 
-      if (!['teacher', 'head', 'admin', 'mazer'].includes(userRole)) {
-        return res.status(403).json({ message: "Forbidden" });
+    if (!['teacher', 'head', 'admin', 'mazer'].includes(userRole)) {
+      return res.status(403).json({ message: "Forbidden" });
+    }
+
+    const schedules = await storage.getSchedulesByTeacher(userId);
+
+    // ✅ Filter out schedules from inactive classes
+    const allClasses = await storage.getAllClasses();
+    const activeClassIds = allClasses
+      .filter(cls => cls.isActive === 1)
+      .map(cls => cls.id);
+    
+    const activeSchedules = schedules.filter(schedule => 
+      activeClassIds.includes(schedule.classId)
+    );
+
+    const classes = await storage.getAllClasses();
+    const majors = await storage.getAllMajors();
+    const subjects = await storage.getAllSubjects();
+    const classMap = new Map(classes.map(c => [c.id, c]));
+    const majorMap = new Map(majors.map(m => [m.id, m]));
+    const subjectMap = new Map(subjects.map(s => [s.id, s]));
+
+    const schedulesWithDetails = activeSchedules.map(schedule => {
+      const classInfo = classMap.get(schedule.classId);
+      const subject = subjectMap.get(schedule.subjectId);
+      const teacher = { id: schedule.teacherId } as any;
+
+      let classLabel = 'Unknown Class';
+      if (classInfo) {
+        const major = majorMap.get(classInfo.majorId);
+        const majorShort = major?.shortName || major?.name || 'Unknown';
+        const groupStr = (classInfo as any).group ? ` ${(classInfo as any).group}` : '';
+        classLabel = `${majorShort} Y${classInfo.year}S${classInfo.semester}${groupStr}`;
       }
 
-      const schedules = await storage.getSchedulesByTeacher(userId);
+      return {
+        ...schedule,
+        subject,
+        teacher,
+        classLabel,
+        classInfo,
+      };
+    });
 
-      const classes = await storage.getAllClasses();
-      const majors = await storage.getAllMajors();
-      const subjects = await storage.getAllSubjects();
-      const classMap = new Map(classes.map(c => [c.id, c]));
-      const majorMap = new Map(majors.map(m => [m.id, m]));
-      const subjectMap = new Map(subjects.map(s => [s.id, s]));
-
-      const schedulesWithDetails = schedules.map(schedule => {
-        const classInfo = classMap.get(schedule.classId);
-        const subject = subjectMap.get(schedule.subjectId);
-        const teacher = { id: schedule.teacherId } as any;
-
-        let classLabel = 'Unknown Class';
-        if (classInfo) {
-          const major = majorMap.get(classInfo.majorId);
-          const majorShort = major?.shortName || major?.name || 'Unknown';
-          const groupStr = (classInfo as any).group ? ` ${(classInfo as any).group}` : '';
-          classLabel = `${majorShort} Y${classInfo.year}S${classInfo.semester}${groupStr}`;
-        }
-
-        return {
-          ...schedule,
-          subject,
-          teacher,
-          classLabel,
-          classInfo,
-        };
-      });
-
-      res.json(schedulesWithDetails);
-    } catch (error) {
-      console.error('my-schedules error', error);
-      res.status(500).json({ message: 'Server error' });
-    }
-  });
+    res.json(schedulesWithDetails);
+  } catch (error) {
+    console.error('my-schedules error', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
 
   // Dashboard metrics endpoints
   app.get("/api/dashboard/metrics", requireAuth, async (req, res) => {
@@ -1804,66 +1902,77 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Class Management
   app.get("/api/classes", requireAuth, async (req, res) => {
-    try {
-      const userRole = (req.session as any).userRole;
-      const userId = (req.session as any).userId;
+  try {
+    const userRole = (req.session as any).userRole;
+    const userId = (req.session as any).userId;
 
-      let classes;
+    let classes;
 
-      if (userRole === 'admin') {
-        // Admin can see all classes
-        classes = await storage.getAllClasses();
-      } else if (userRole === 'head') {
-        // Head can see classes from their department
-        const currentUser = await storage.getUser(userId);
-        if (!currentUser?.departmentId) {
-          return res.status(400).json({ message: "User department not found" });
-        }
-
-        // Get all majors in the head's department
-        const departmentMajors = await storage.getMajorsByDepartment(currentUser.departmentId);
-        const majorIds = departmentMajors.map(m => m.id);
-
-        // Get classes for those majors
-        classes = await storage.getClassesByMajors(majorIds);
-      } else {
-        return res.status(403).json({ message: "Access denied" });
+    if (userRole === 'admin') {
+      // Admin can see all classes (including inactive for management)
+      classes = await storage.getAllClasses();
+    } else if (userRole === 'head') {
+      // Head can see classes from their department
+      const currentUser = await storage.getUser(userId);
+      if (!currentUser?.departmentId) {
+        return res.status(400).json({ message: "User department not found" });
       }
 
-      // Get all majors to build fullClassName
-      const majors = await storage.getAllMajors();
-      const majorMap = new Map(majors.map(m => [m.id, m]));
-
-      // Add fullClassName to each class
-      const classesWithFullName = classes.map(cls => {
-        const major = majorMap.get(cls.majorId);
-        const majorShort = major?.shortName || major?.name || 'Unknown';
-        const majorFull = major?.name || 'Unknown';
-        const groupStr = (cls as any).group ? ` ${(cls as any).group}` : '';
-
-        // Compact format for database and internal use (classLabel)
-        const classLabel = `${majorShort} Y${cls.year}S${cls.semester}${groupStr}`;
-
-        // Readable format for dropdowns and UI display
-        const yearText = `Year ${cls.year}`;
-        const semesterText = `Semester ${cls.semester}`;
-        const groupText = (cls as any).group || '';
-        const displayClassName = `${majorFull} - ${yearText} - ${semesterText}${groupText ? ' - Group ' + groupText : ''}`;
-
-        return {
-          ...cls,
-          classLabel,          // New: BDSE Y2S2 M1
-          fullClassName: classLabel, // Alias for backward compatibility
-          displayClassName,    // Readable format
-          majorShort          // For quick access in filtering
-        };
-      });
-
-      res.json(classesWithFullName);
-    } catch (error) {
-      res.status(500).json({ message: "Server error" });
+      const departmentMajors = await storage.getMajorsByDepartment(currentUser.departmentId);
+      const majorIds = departmentMajors.map(m => m.id);
+      classes = await storage.getClassesByMajors(majorIds);
+    } else if (userRole === 'class_moderator' || userRole === 'moderator') {
+      // ✅ NEW: Class moderators only see their assigned ACTIVE classes
+      const allClasses = await storage.getAllClasses();
+      const currentUser = await storage.getUser(userId);
+      
+      if (currentUser?.classId) {
+        classes = allClasses.filter(cls => 
+          cls.id === currentUser.classId && cls.isActive === 1
+        );
+      } else {
+        classes = [];
+      }
+    } else {
+      return res.status(403).json({ message: "Access denied" });
     }
-  });
+
+    // ✅ IMPORTANT: For non-admin users, filter to active classes only
+    if (userRole !== 'admin') {
+      classes = classes.filter(cls => cls.isActive === 1);
+    }
+
+    // Get all majors to build fullClassName
+    const majors = await storage.getAllMajors();
+    const majorMap = new Map(majors.map(m => [m.id, m]));
+
+    // Add fullClassName to each class
+    const classesWithFullName = classes.map(cls => {
+      const major = majorMap.get(cls.majorId);
+      const majorShort = major?.shortName || major?.name || 'Unknown';
+      const majorFull = major?.name || 'Unknown';
+      const groupStr = (cls as any).group ? ` ${(cls as any).group}` : '';
+
+      const classLabel = `${majorShort} Y${cls.year}S${cls.semester}${groupStr}`;
+      const yearText = `Year ${cls.year}`;
+      const semesterText = `Semester ${cls.semester}`;
+      const groupText = (cls as any).group || '';
+      const displayClassName = `${majorFull} - ${yearText} - ${semesterText}${groupText ? ' - Group ' + groupText : ''}`;
+
+      return {
+        ...cls,
+        classLabel,
+        fullClassName: classLabel,
+        displayClassName,
+        majorShort
+      };
+    });
+
+    res.json(classesWithFullName);
+  } catch (error) {
+    res.status(500).json({ message: "Server error" });
+  }
+});
 
   app.post("/api/classes", requireAuth, async (req, res) => {
     try {
